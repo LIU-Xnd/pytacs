@@ -41,6 +41,9 @@ class SpatialHandler:
     def threshold_confidence(self) -> float:
         return self.local_classifier.threshold_confidence
     @property
+    def has_negative_control(self) -> bool:
+        return self.local_classifier.has_negative_control
+    @property
     def filtrations(self) -> dict:
         copy_ = dict()
         for k, v in self.__filtrations.items():
@@ -72,6 +75,7 @@ class SpatialHandler:
 - threshold_adjacent: {self.threshold_adjacent}
 - local_classifier: {self.local_classifier}
     + threshold_confidence: {self.threshold_confidence}
+    + has_negative_control: {self.has_negative_control}
 - max_spots_per_cell: {self.max_spots_per_cell}
 - scale_rbf: {self.scale_rbf}
 - filtrations: {len(self.filtrations)} fitted
@@ -173,6 +177,10 @@ class SpatialHandler:
             X=_np.array([list(self._aggregate_spots_given_filtration(filtration_this_level))]),
             genes=self.adata_spatial.var.index,
         )[0,:]
+        # Remove the NegativeControl proba
+        # print(probas)
+        if self.has_negative_control:
+            probas = probas[:-1]
         return probas
     
     def _buildFiltration_addSpotsUntilConfident(
@@ -211,26 +219,26 @@ class SpatialHandler:
     def run_segmentation(
         self,
         coverage_to_stop: float = 0.8,
-        max_iter: int = 1000,
+        max_iter: int = 200,
         verbose: bool = True,
     ):
         """Segments the spots into single cells. Seed spots are selected randomly and sequentially.
         Updates self.sampleIds_new, self.confidences_new, self.classes_new."""
         for i_iter in range(max_iter):
-            if verbose and i_iter % 50 == 0:
+            if verbose and i_iter % 5 == 0:
                 print(f'Iteration {i_iter+1}: so far size {_getsizeof(self)/1e3:.2f}KB')
             available_spots = self.unmasked_spotIds
             if len(available_spots) == 0:
                 print("All spots queried. Done.")
                 return None
             ix_centroid = _np.random.choice(available_spots)
-            if verbose and i_iter % 50 == 0:
+            if verbose and i_iter % 5 == 0:
                 print(f"Querying spot {ix_centroid} ...")
             conf, label, _ = self._buildFiltration_addSpotsUntilConfident(ix_centroid)
-            if verbose and i_iter % 50 == 0:
+            if verbose and i_iter % 5 == 0:
                 print(f"Spot {ix_centroid} | confidence: {conf*100:.3f}% | class: {label}")
             coverage = (self.mask_newIds>-1).sum() / len(self.mask_newIds)
-            if verbose and i_iter % 50 == 0:
+            if verbose and i_iter % 5 == 0:
                 print(f"Coverage: {coverage*100:.2f}%")
             if coverage >= coverage_to_stop:
                 break
@@ -248,8 +256,8 @@ class SpatialHandler:
     ) -> _AnnData:
         """Get segmented single-cell level spatial transcriptomic AnnData.
         Note: cache shares the same id with what this method returns."""
-        if (not force) and (not (self.cache is _UNDEFINED)):
-            return self.cache
+        if (not force) and (not (self.cache_singleCellAnnData is _UNDEFINED)):
+            return self.cache_singleCellAnnData
         sc_X = []
         raw_X = self.adata_spatial.X.toarray()
         for ix_new in self.sampleIds_new:

@@ -78,7 +78,7 @@ def save_and_tidy_index(
     adata: _AnnData,
     colname_to_save_oldIndex: str = 'old_index',
 ) -> None:
-    """Save old index as a col of obs and re-index with integers (only apply
+    """Save old index as a col of obs and re-index with integers (objects) (only apply
      for .obs).
     Inplace operation."""
     if colname_to_save_oldIndex in adata.obs_keys():
@@ -86,6 +86,7 @@ def save_and_tidy_index(
         return None
     adata.obs[colname_to_save_oldIndex] = adata.obs.index
     adata.obs.index = _np.arange(adata.obs.shape[0])
+    adata.obs.index = adata.obs.index.astype(object)
     return None
 # --- Reshaping operations --- <<<
 
@@ -101,13 +102,5 @@ def radial_basis_function(
         _np.power(_np.linalg.norm(location_vector-centroid_vector),2) / (2*_np.power(scale,2))
     )
 
-def normalize_rows(
-    X: _np.ndarray,
-    target_sum: float = 1e4,
-) -> _np.ndarray:
-    colsums = X.sum(axis=1)
-    colsums[colsums==0] = 1
-    colsums = colsums.reshape(-1,1)
-    return _np.divide(X, colsums) * 1e4
 
 # --- math tools --- <<<

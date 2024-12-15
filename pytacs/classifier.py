@@ -5,15 +5,15 @@ import numpy as _np
 from scipy.sparse import csr_matrix as _csr_matrix
 
 from .utils import _UNDEFINED
-from .utils import normalize_rows as _normalize
 from .utils import subCountMatrix_genes2InGenes1 as _get_subCountMatrix
 
 # >>> ---- Local Classifier ----
 class LocalClassfier(_SVC):
     """Based on sklearn.svm.SVC (See relevant reference there),
      specially built for snRNA-seq data training.
-     This classifier would predict probabilities for each class.
-     An OVR (One-versus-Rest) strategy is used.
+    This classifier would predict probabilities for each class, as well as
+     the negative-control class (the last class).
+    An OVR (One-versus-Rest) strategy is used.
 
     .fit(), .predict(), and .predict_proba() are specially built, but
      often the last two methods are not to be called manually.
@@ -47,15 +47,14 @@ class LocalClassfier(_SVC):
     def __init__(
         self,
         threshold_confidence: float = 0.75,
-        genes_to_keep_from: list[str] = None,
         C: float = 1.0,
         tol: float = 1e-3,
         cache_size: float = 200,
         random_state: int | None = None,
         **kwargs
     ):
-        self.genes_to_keep_from = genes_to_keep_from
         self.__threshold_confidence = threshold_confidence
+        self.__has_negative_control = False
         self.__genes = _UNDEFINED
         self.__classes = _UNDEFINED
         return super().__init__(
@@ -72,6 +71,9 @@ class LocalClassfier(_SVC):
     def set_threshold_confidence(self, value: float = 0.75):
         self.__threshold_confidence = value
         return self
+    @property
+    def has_negative_control(self) -> bool:
+        return self.__has_negative_control
     @property
     def genes(self):
         return self.__genes.copy()
@@ -122,6 +124,15 @@ class LocalClassfier(_SVC):
         """
         self.__genes = _np.array(sn_adata.var.index)
         self.__classes = _np.array((sn_adata.obs[colname_classes]).unique())
+        # Move the NegativeControl label to the end
+        if '__NegativeControl' in self.__classes:
+            self.__has_negative_control = True
+            self.__classes = _np.concatenate([
+                self.__classes[self.__classes!='__NegativeControl'],
+                _np.array(['__NegativeControl']),
+            ])
+        else:
+            self.__has_negative_control = False
         # Prepare y: convert classNames into classIds
         class_ids = self.classNames_to_classIds(_np.array(sn_adata.obs[colname_classes]))
         X_train = _sc.pp.normalize_total(
@@ -147,7 +158,7 @@ class LocalClassfier(_SVC):
         assert (len(genes) == X.shape[1]), 'genes must be compatible with X.shape[1]'
         # Select those genes that appear in self.__genes
         X_new = _get_subCountMatrix(X, self.__genes, genes)
-        return super().predict_proba(_normalize(X_new))
+        return super().predict_proba(X_new)
 
     def predict(
         self,

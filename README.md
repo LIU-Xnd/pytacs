@@ -46,4 +46,4 @@ single_cell = sph.run_getSingleCellAnnData()
 
 ## Demo
 
-[demo.html](./demo.html)
+[demo.ipynb](./demo.ipynb)

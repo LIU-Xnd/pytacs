@@ -34,3 +34,6 @@ sph.run_segmentation()
 single_cell = sph.run_getSingleCellAnnData()
 ```
 
+## Demo
+
+[demo.html](demo.html)

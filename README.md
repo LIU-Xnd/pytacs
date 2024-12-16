@@ -11,7 +11,17 @@ But Pytacs has improved it in several ways:
 3. Provides a more generalized input-output protocol (based on h5ad format / scanpy object), and users can get integrated single-cell ST output data (in h5ad format) conveniently.
 
 ## Requirements
-Under construction ...
+```
+# python == 3.10.15
+numpy == 1.26.4
+pandas == 1.5.3
+scanpy == 1.9.6
+scikit-learn == 1.5.1
+scipy == 1.13.1
+```
+Could install by `$ pip install -r requirements.txt`.
+
+(Still under construction...)
 
 ## Usage
 ```{python}
@@ -36,4 +46,4 @@ single_cell = sph.run_getSingleCellAnnData()
 
 ## Demo
 
-[demo.html](demo.html)
+[demo.html](./demo.html)

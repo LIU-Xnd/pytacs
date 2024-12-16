@@ -10,7 +10,7 @@
 # - Abstract LocalClassifier [x] - SVM works fine so far, after debugging
 #   + Define SVC and MLP as subclasses [x] 
 # - Add README [v]
-# - Add requirements.txt []
+# - Add requirements.txt [v]
 # - Improve documentations []
 
 

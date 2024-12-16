@@ -1,4 +1,5 @@
 from scanpy import AnnData as _AnnData
+import scanpy as _sc
 import pandas as _pd
 import numpy as _np
 from scipy.sparse import csr_matrix as _csr_matrix
@@ -23,6 +24,7 @@ class AnnDataPreparer:
 - sn_adata: {self.sn_adata}
 - sp_adata: {self.sp_adata}
 - sn_adata_withNegativeControl: {self.__sn_adata_withNegativeControl}
+- normalized: {self.__normalized}
 --- --- --- --- ---
 """
 
@@ -89,9 +91,10 @@ class AnnDataPreparer:
             print(f"Warning: Overlapped genes of two datasets too few!")
         
         overlapped_genes = list(overlapped_genes)
-        self.sn_adata = sn_adata_copy[:, overlapped_genes]
+        self.sn_adata = sn_adata_copy[:, overlapped_genes].copy()
         self.sp_adata = sp_adata_copy
         self.__sn_adata_withNegativeControl: _AnnData = _UNDEFINED
+        self.__normalized = False
         return None
     
     @property
@@ -164,6 +167,18 @@ class AnnDataPreparer:
             self.__sn_adata_withNegativeControl = sn_adata_withNegativeControl
         return sn_adata_withNegativeControl
     
-
+    def normalize(
+            self,
+            force: bool = False
+    ):
+        """Normalize all count matrices by rows."""
+        if self.__normalized and not force:
+            print("Normalization has already been done before! Skip.")
+            return None
+        _sc.pp.normalize_total(self.sn_adata, target_sum=1e4)
+        _sc.pp.normalize_total(self.sp_adata, target_sum=1e4)
+        _sc.pp.normalize_total(self.sn_adata_withNegativeControl, target_sum=1e4)
+        self.__normalized = True
+        return None
 
         

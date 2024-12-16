@@ -6,6 +6,8 @@
 # TODO:
 # - Only use overlapped genes -> wrapped in a new class [v]
 # - Add negative control (simulated) training samples [v]
+# - Abstract LocalClassifier []
+#   + Define SVC and MLP as subclasses [] 
 # - Add README []
 # - Add requirements.txt []
 # - Improve documentations []
@@ -13,6 +15,6 @@
 
 __version__ = '0.9.1'
 
-from .classifier import LocalClassfier
+from .classifier import LocalClassifier
 from .spatial import SpatialHandler
 from .data import AnnDataPreparer

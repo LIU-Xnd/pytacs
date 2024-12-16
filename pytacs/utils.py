@@ -93,13 +93,13 @@ def save_and_tidy_index(
 # >>> --- math tools ---
 def radial_basis_function(
     location_vector: _np.ndarray,
-    centroid_vector: _np.ndarray | None,
+    centroid_vector: _np.ndarray | None = None,
     scale: float = 1.,
 ) -> float:
     if centroid_vector is None:
         centroid_vector = _np.zeros((location_vector.shape[0],))
     return (1/_np.power(2*_np.pi*_np.power(scale,2), location_vector.shape[0]/2)) * _np.exp(
-        _np.power(_np.linalg.norm(location_vector-centroid_vector),2) / (2*_np.power(scale,2))
+        -_np.power(_np.linalg.norm(location_vector-centroid_vector),2) / (2*_np.power(scale,2))
     )
 
 

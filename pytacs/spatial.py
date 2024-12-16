@@ -1,11 +1,9 @@
 from scanpy import AnnData as _AnnData
 import numpy as _np
-import pandas as _pd
 from scipy.sparse import csr_matrix as _csr_matrix
 from scipy.spatial import distance_matrix as _distance_matrix
-from .classifier import LocalClassfier as _LocalClassifier
+from .classifier import LocalClassifier as _LocalClassifier
 from .utils import radial_basis_function as _rbf
-from sys import getsizeof as _getsizeof
 
 from .utils import _UNDEFINED
 
@@ -123,6 +121,7 @@ class SpatialHandler:
     def _buildFiltration_addOneSpot(
         self,
         idx_centroid: int,
+        verbose: bool = True,
     ) -> int:
         """Randomly (with rbf probs) adds one spot for the cell
          centered at idx_centroid.
@@ -134,12 +133,14 @@ class SpatialHandler:
         loc_centroid = self.adata_spatial.obs[['x','y']].values[idx_centroid,:]
         self.__filtrations[idx_centroid] = self.__filtrations.get(idx_centroid, [idx_centroid])
         if len(self.__filtrations[idx_centroid]) >= self.max_spots_per_cell:
-            print(f"Warning: reaches max_spots_per_cell {self.max_spots_per_cell}")
+            if verbose:
+                print(f"Warning: reaches max_spots_per_cell {self.max_spots_per_cell}")
             return -1
         # Find adjacent candidate spots
         idxs_adjacent = self._find_adjacentOfManySpots_spotIds(self.__filtrations[idx_centroid])
         if len(idxs_adjacent) == 0:
-            print(f"Warning: no adjacent spots found! Check threshold_adjacent {self.threshold_adjacent}")
+            if verbose:
+                print(f"Warning: no adjacent spots found! Check threshold_adjacent {self.threshold_adjacent}")
             return -1
         # Calculate the probs
         probs = []
@@ -151,7 +152,7 @@ class SpatialHandler:
         # Select one randomly
         idx_selected = _np.random.choice(idxs_adjacent, p=probs)
         # Update the filtration
-        self.filtrations[idx_centroid].append(idx_selected)
+        self.__filtrations[idx_centroid].append(idx_selected)
         return idx_selected
 
     def _aggregate_spots_given_filtration(
@@ -186,6 +187,7 @@ class SpatialHandler:
     def _buildFiltration_addSpotsUntilConfident(
         self,
         idx_centroid: int,
+        verbose: bool = True,
     ) -> tuple[float, int, int]:
         """Find many spots centered at idx_centroid that are confidently in a class.
         
@@ -205,12 +207,15 @@ class SpatialHandler:
                 self.__classes_new[idx_centroid] = label
                 self.__confidences_new[idx_centroid] = confidence
                 break
-            idx_added = self._buildFiltration_addOneSpot(idx_centroid)
+            idx_added = self._buildFiltration_addOneSpot(idx_centroid, verbose=verbose)
             if idx_added == -1:
                 label = -1
                 break
         else:
             label = -1
+        if label == -1:
+            # Clear filtrations that are not confident
+            del self.__filtrations[idx_centroid]
         return (confidence, label, idx_centroid)
 
     # Need to be careful with input idx_centroid - you don't want to
@@ -221,12 +226,16 @@ class SpatialHandler:
         coverage_to_stop: float = 0.8,
         max_iter: int = 200,
         verbose: bool = True,
+        warnings: bool = False,
+        print_summary: bool = True,
     ):
         """Segments the spots into single cells. Seed spots are selected randomly and sequentially.
         Updates self.sampleIds_new, self.confidences_new, self.classes_new."""
+        confident_count = 0
+        class_count = dict()
         for i_iter in range(max_iter):
             if verbose and i_iter % 5 == 0:
-                print(f'Iteration {i_iter+1}: so far size {_getsizeof(self)/1e3:.2f}KB')
+                print(f'Iteration {i_iter+1}:')
             available_spots = self.unmasked_spotIds
             if len(available_spots) == 0:
                 print("All spots queried. Done.")
@@ -234,18 +243,30 @@ class SpatialHandler:
             ix_centroid = _np.random.choice(available_spots)
             if verbose and i_iter % 5 == 0:
                 print(f"Querying spot {ix_centroid} ...")
-            conf, label, _ = self._buildFiltration_addSpotsUntilConfident(ix_centroid)
+            conf, label, _ = self._buildFiltration_addSpotsUntilConfident(ix_centroid, verbose=warnings)
             if verbose and i_iter % 5 == 0:
-                print(f"Spot {ix_centroid} | confidence: {conf*100:.3f}% | class: {label}")
+                if conf >= self.threshold_confidence:
+                    confident_count += 1
+                    class_count[label] = class_count.get(label, 0) + 1
+                print(f"Spot {ix_centroid} | confidence: {conf*100:.3f}% | confident total: {confident_count} | class: {label}")
+                print(f"Classes total: {class_count}")
             coverage = (self.mask_newIds>-1).sum() / len(self.mask_newIds)
             if verbose and i_iter % 5 == 0:
                 print(f"Coverage: {coverage*100:.2f}%")
             if coverage >= coverage_to_stop:
                 break
-        else:
-            print(f"Reaches max_iter {max_iter}!")
+        else: 
+            if warnings:
+                print(f"Reaches max_iter {max_iter}!")
         if verbose:
             print("Done.")
+        if print_summary:
+            print(f"""--- Summary ---
+Queried {max_iter} spots (with replacement), of which {confident_count} made up confident single cells.
+Classes total: {class_count}
+Coverage: {coverage*100:.2f}%
+--- --- --- --- ---
+""")
         return None
                 
 

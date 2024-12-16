@@ -1,6 +1,5 @@
 from sklearn.svm import SVC as _SVC
 from scanpy import AnnData as _AnnData
-import scanpy as _sc
 import numpy as _np
 from scipy.sparse import csr_matrix as _csr_matrix
 
@@ -8,7 +7,7 @@ from .utils import _UNDEFINED
 from .utils import subCountMatrix_genes2InGenes1 as _get_subCountMatrix
 
 # >>> ---- Local Classifier ----
-class LocalClassfier(_SVC):
+class LocalClassifier(_SVC):
     """Based on sklearn.svm.SVC (See relevant reference there),
      specially built for snRNA-seq data training.
     This classifier would predict probabilities for each class, as well as
@@ -135,9 +134,7 @@ class LocalClassfier(_SVC):
             self.__has_negative_control = False
         # Prepare y: convert classNames into classIds
         class_ids = self.classNames_to_classIds(_np.array(sn_adata.obs[colname_classes]))
-        X_train = _sc.pp.normalize_total(
-            sn_adata, target_sum=1e4, inplace=False
-        )['X']
+        X_train = sn_adata.X
         if type(X_train) is _csr_matrix:
             X_train = X_train.toarray()
         return super().fit(X=X_train, y=class_ids)

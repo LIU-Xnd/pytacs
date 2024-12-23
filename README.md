@@ -45,5 +45,10 @@ single_cell = sph.run_getSingleCellAnnData()
 ```
 
 ## Demo
-
 [demo.ipynb](./demo.ipynb)
+
+## Issues
+The spatial coordiates by convention are saved in `.obsm`
+because `'x'` and `'y'` are interrelated. But in this tool they are expected to be
+put separately as columns in `.obs`. This might be a break of convention that
+needs addressing in the future.

@@ -5,10 +5,9 @@
 # Author: Liu X., 2024
 
 # TODO:
-# - Only use overlapped genes -> wrapped in a new class [v]
-# - Add negative control (simulated) training samples [v]
-# - Abstract LocalClassifier [x] - SVM works fine so far, after debugging
-#   + Define SVC and MLP as subclasses [x] 
+# - Improve run_getSingleCellAnnData()
+#    + Add: Coordinate remapping []
+#    + Add: Shape smoothing [] (if a spot is surrounded by spots of the same class, then make it of that class, too)
 # - Add README [v]
 # - Add requirements.txt [v]
 # - Improve documentations []

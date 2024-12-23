@@ -290,7 +290,7 @@ Coverage: {coverage*100:.2f}%
         )
         sc_adata.obs['confidence'] = 0.
         for ix_new in self.sampleIds_new:
-            sc_adata.obs['confidence'][ix_new] = self.confidences_new[ix_new]
+            sc_adata.obs.loc[ix_new, 'confidence'] = self.confidences_new[ix_new]
         # Save cache
         if cache:
             self.cache_singleCellAnnData = sc_adata

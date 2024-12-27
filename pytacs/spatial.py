@@ -27,6 +27,7 @@ class SpatialHandler:
         # dict {idx_centroid: [idx_centroid, idx_spot_level1, idx_spot_level2, ...]}
         
         self.__mask_newIds = _np.full((self.adata_spatial.X.shape[0],), fill_value=-1, dtype=int)
+        # mask on each old sample. -1 for not assigned; otherwise the new id.
         
         self.__classes_new = dict()
         self.__confidences_new = dict()
@@ -244,10 +245,10 @@ class SpatialHandler:
             if verbose and i_iter % 5 == 0:
                 print(f"Querying spot {ix_centroid} ...")
             conf, label, _ = self._buildFiltration_addSpotsUntilConfident(ix_centroid, verbose=warnings)
+            if conf >= self.threshold_confidence:
+                confident_count += 1
+                class_count[label] = class_count.get(label, 0) + 1
             if verbose and i_iter % 5 == 0:
-                if conf >= self.threshold_confidence:
-                    confident_count += 1
-                    class_count[label] = class_count.get(label, 0) + 1
                 print(f"Spot {ix_centroid} | confidence: {conf*100:.3f}% | confident total: {confident_count} | class: {label}")
                 print(f"Classes total: {class_count}")
             coverage = (self.mask_newIds>-1).sum() / len(self.mask_newIds)
@@ -290,7 +291,7 @@ Coverage: {coverage*100:.2f}%
         )
         sc_adata.obs['confidence'] = 0.
         for ix_new in self.sampleIds_new:
-            sc_adata.obs.loc[ix_new, 'confidence'] = self.confidences_new[ix_new]
+            sc_adata.obs.loc[str(ix_new), 'confidence'] = self.confidences_new[ix_new]
         # Save cache
         if cache:
             self.cache_singleCellAnnData = sc_adata

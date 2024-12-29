@@ -7,7 +7,7 @@ Ideas are based on (Benjamin et al., 2024)'s work TopACT (see https://gitlab.com
 But Pytacs has improved it in several ways:
 
 1. The shape of predicted cells are diverse rather than a rectangle/grid;
-2. Negative-control samples are introduced for better performance of local classifiers;
+2. Negative-control samples are introduced for better performance of local classifier SVM;
 3. Provides a more generalized input-output protocol (based on h5ad format / scanpy object), and users can get integrated single-cell ST output data (in h5ad format) conveniently.
 
 ## Requirements
@@ -20,6 +20,18 @@ scikit-learn == 1.5.1
 scipy == 1.13.1
 ```
 Could install by `$ pip install -r requirements.txt`.
+
+Or for newer version compatiblity of scanpy,
+
+```
+# python == 3.12.2
+numpy == 1.26.4
+pandas == 2.2.3
+scanpy == 1.10.4
+scikit-learn == 1.5.2
+scipy == 1.14.1
+```
+Could install by `$ pip install -r requirements_py312.txt`.
 
 (Still under construction...)
 
@@ -48,7 +60,14 @@ single_cell = sph.run_getSingleCellAnnData()
 [demo.ipynb](./demo.ipynb)
 
 ## Issues
-The spatial coordiates by convention are saved in `.obsm`
+
+1. The spatial coordiates by convention should have been saved in `.obsm`
 because `'x'` and `'y'` are interrelated. But in this tool they are expected to be
 put separately as columns in `.obs`. This might be a break of convention that
 needs addressing in the future.
+
+2. The local classifiers now only support SVMs, and are badly encapsulated. Need improving.
+
+    2.1 Add gaussian mixed model which needs no negative control.
+    
+    2.2 Rewrite abstract class for `LocalClassifier`. Write `SVM(LocalClassifier)` and `GaussMixed(LocalClassifier)`.

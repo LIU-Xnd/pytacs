@@ -107,8 +107,8 @@ class AnnDataPreparer:
 
     @property
     def sn_adata_withNegativeControl(self) -> _AnnData:
-        if self.__sn_adata_withNegativeControl is _UNDEFINED:
-            self.simulate_negative_control()
+        # if self.__sn_adata_withNegativeControl is _UNDEFINED:
+        #     self.simulate_negative_control()
         return self.__sn_adata_withNegativeControl
 
     def simulate_negative_control(
@@ -188,12 +188,16 @@ class AnnDataPreparer:
 
     def normalize(self, force: bool = False):
         """Normalize all count matrices by rows."""
-        if self.__normalized and not force:
-            print("Normalization has already been done before! Skip.")
-            return None
-        _sc.pp.normalize_total(self.sn_adata, target_sum=1e4)
-        _sc.pp.normalize_total(self.sp_adata, target_sum=1e4)
-        _sc.pp.normalize_total(
-            self.sn_adata_withNegativeControl, target_sum=1e4)
-        self.__normalized = True
-        return None
+        # v1.0.0 - normalization has bugs. Do not use it for now.
+        print("v1.0.0 - normalization has bugs. Do not use it for now! Skip.")
+        return
+        # if self.__normalized and not force:
+        #     print("Normalization has already been done before! Skip.")
+        #     return None
+        # _sc.pp.normalize_total(self.sn_adata, target_sum=1e4)
+        # _sc.pp.normalize_total(self.sp_adata, target_sum=1e4)
+        # if self.__sn_adata_withNegativeControl is not _UNDEFINED:
+        #     _sc.pp.normalize_total(
+        #         self.sn_adata_withNegativeControl, target_sum=1e4)
+        # self.__normalized = True
+        # return None

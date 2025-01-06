@@ -29,5 +29,5 @@
 __version__ = "1.0.0"
 
 from .data import AnnDataPreparer
-from .classifier import SVM  #, GMM
+from .classifier import SVM, GaussianNaiveBayes
 from .spatial import SpatialHandler

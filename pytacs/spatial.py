@@ -264,7 +264,7 @@ class SpatialHandler:
         if print_summary:
             print(f"""--- Summary ---
 Queried {max_iter} spots (with replacement), of which {confident_count} made up confident single cells.
-Classes total: {class_count}
+Classes total (this round): {class_count}
 Coverage: {coverage*100:.2f}%
 --- --- --- --- ---
 """)

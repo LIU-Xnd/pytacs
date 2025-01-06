@@ -1,10 +1,13 @@
 from sklearn.svm import SVC as _SVC
-from sklearn.mixture import GaussianMixture as _GMM
+
+from sklearn.naive_bayes import GaussianNB as _GaussianNB
+from sklearn.multioutput import MultiOutputClassifier as _MultiOutputClassifier
+
 from scanpy import AnnData as _AnnData
 import numpy as _np
 from scipy.sparse import csr_matrix as _csr_matrix
 from typing import Literal, Iterable
-from .utils import _UNDEFINED
+from .utils import _UNDEFINED, _Undefined
 from .utils import subCountMatrix_genes2InGenes1 as _get_subCountMatrix
 
 
@@ -16,7 +19,7 @@ class LocalClassifier:
     .fit(), .predict(), and .predict_proba() are specially built, but
      often the last two methods are not to be called manually.
 
-    Predicted integer i indicates the class self.__classes[i].
+    Predicted integer i indicates the class self._classes[i].
 
     Needs overwriting.
 
@@ -31,39 +34,39 @@ class LocalClassifier:
         threshold_confidence: float = 0.75,
         **kwargs,
     ):
-        self.__threshold_confidence: float = threshold_confidence
-        self.__has_negative_control: bool = False
-        self.__genes: _np.ndarray[str] | Literal[_UNDEFINED] = _UNDEFINED
-        self.__classes: _np.ndarray[str] | Literal[_UNDEFINED] = _UNDEFINED
-        return self
+        self._threshold_confidence: float = threshold_confidence
+        self._has_negative_control: bool = False
+        self._genes: _np.ndarray[str] | _Undefined = _UNDEFINED
+        self._classes: _np.ndarray[str] | _Undefined = _UNDEFINED
+        return None
 
     @property
     def threshold_confidence(self) -> float:
-        return self.__threshold_confidence
+        return self._threshold_confidence
 
     def set_threshold_confidence(self, value: float = 0.75):
-        self.__threshold_confidence = value
+        self._threshold_confidence = value
         return self
 
     @property
     def has_negative_control(self) -> bool:
-        return self.__has_negative_control
+        return self._has_negative_control
 
     @property
-    def genes(self) -> _np.ndarray[str] | Literal[_UNDEFINED]:
-        return self.__genes.copy()
+    def genes(self) -> _np.ndarray[str] | _Undefined:
+        return self._genes.copy()
 
     @property
-    def classes(self) -> _np.ndarray[str] | Literal[_UNDEFINED]:
-        return self.__classes.copy()
+    def classes(self) -> _np.ndarray[str] | _Undefined:
+        return self._classes.copy()
 
     def classId_to_className(self, class_id: int) -> str:
-        """Returns self.__classes[class_id]."""
-        return self.__classes[class_id]
+        """Returns self._classes[class_id]."""
+        return self._classes[class_id]
 
     def className_to_classId(self, class_name: str) -> int:
-        """Returns the index where `class_name` is in self.__classes."""
-        return _np.where(self.__classes == class_name)[0][0]
+        """Returns the index where `class_name` is in self._classes."""
+        return _np.where(self._classes == class_name)[0][0]
 
     def classIds_to_classNames(self, class_ids: Iterable[int]) -> _np.ndarray[str]:
         return _np.array(
@@ -102,21 +105,21 @@ class LocalClassifier:
         Return (overwritten):
             self (Model): a trained model (self).
         """
-        self.__genes: _np.ndarray[str] = _np.array(sn_adata.var.index)
-        self.__classes: _np.ndarray[str] = _np.array(
+        self._genes: _np.ndarray[str] = _np.array(sn_adata.var.index)
+        self._classes: _np.ndarray[str] = _np.array(
             (sn_adata.obs[colname_classes]).unique()
         ).astype(str)
         # Move the __NegativeControl label to the end
-        if "__NegativeControl" in self.__classes:
-            self.__has_negative_control: bool = True
-            self.__classes: _np.ndarray[str] = _np.concatenate(
+        if "__NegativeControl" in self._classes:
+            self._has_negative_control: bool = True
+            self._classes: _np.ndarray[str] = _np.concatenate(
                 [
-                    self.__classes[self.__classes != "__NegativeControl"],
+                    self._classes[self._classes != "__NegativeControl"],
                     _np.array(["__NegativeControl"]),
                 ]
             )
         else:
-            self.__has_negative_control: bool = False
+            self._has_negative_control: bool = False
         # Prepare y: convert classNames into classIds
         class_ids: _np.ndarray[int] = self.classNames_to_classIds(
             _np.array(sn_adata.obs[colname_classes]).astype(str)
@@ -155,11 +158,11 @@ class LocalClassifier:
         assert type(X) is _np.ndarray
         assert len(X.shape) == 2, "X must be a sample-by-gene matrix"
         if genes is None:
-            genes = self.__genes
+            genes = self._genes
         assert len(
             genes) == X.shape[1], "genes must be compatible with X.shape[1]"
-        # Select those genes that appear in self.__genes
-        X_new = _get_subCountMatrix(X, self.__genes, genes)
+        # Select those genes that appear in self._genes
+        X_new = _get_subCountMatrix(X, self._genes, genes)
         return dict(X=X_new)
 
     def predict(
@@ -206,7 +209,7 @@ class SVM(LocalClassifier):
     .fit(), .predict(), and .predict_proba() are specially built, but
      often the last two methods are not to be called manually.
 
-    Predicted integer i indicates the class self.__classes[i].
+    Predicted integer i indicates the class self._classes[i].
 
     Args
     ----------
@@ -242,7 +245,7 @@ class SVM(LocalClassifier):
         random_state: int | None = None,
         **kwargs,
     ):
-        self.__model = _SVC(
+        self._model = _SVC(
             C=C,
             tol=tol,
             cache_size=cache_size,
@@ -279,7 +282,7 @@ class SVM(LocalClassifier):
             colname_classes=colname_classes,
         )
 
-        self.__model.fit(X=X_y_ready["X"], y=X_y_ready["y"])
+        self._model.fit(X=X_y_ready["X"], y=X_y_ready["y"])
         return self
 
     def predict_proba(
@@ -301,7 +304,7 @@ class SVM(LocalClassifier):
              each row is a sample and each column is a class."""
 
         X_ready: dict = super().predict_proba(X, genes)
-        return self.__model.predict_proba(X_ready["X"])
+        return self._model.predict_proba(X_ready["X"])
 
     def predict(  # LEFT HERE 2025.1.6
         self,
@@ -322,4 +325,121 @@ class SVM(LocalClassifier):
         Return:
             _np.ndarray[int]: an array of predicted classIds."""
 
+        return super().predict(X, genes)
+
+
+class GaussianNaiveBayes(LocalClassifier):
+    """This classifier based on Gaussian Naive Bayes models would predict
+     probabilities for each class, as well as
+     the negative-control class (the last class, but not necessary),
+     if generated.
+
+    .fit(), .predict(), and .predict_proba() are specially built, but
+     often the last two methods are not to be called manually.
+
+    Predicted integer i indicates the class self._classes[i].
+
+    For other parameters related to GaussianNB, see reference at
+     `sklearn.naive_bayes.GaussianNB`.
+    
+    Args
+    ----------
+    threshold_confidence : float, default=0.75
+        Confidence according to which whether the classifier predicts a sample
+        to be in a class.
+    """
+
+    def __init__(self, threshold_confidence = 0.75, **kwargs):
+        super().__init__(threshold_confidence=threshold_confidence)
+        gnb = _GaussianNB(**kwargs)
+        self._model = _MultiOutputClassifier(estimator=gnb)
+        return None
+    
+    def fit(self,
+            sn_adata: _AnnData,
+            colname_classes: str = "cell_type"):
+        """Trains the local classifier using the AnnData (h5ad) format
+        snRNA-seq data.
+
+        Args:
+            sn_adata (AnnData): snRNA-seq h5ad data. Must have attributes:
+             .X, the sample-by-gene count matrix;
+             .obs['cell_type'] or named otherwise, that indicates the label of
+             each sample;
+             .var, whose index indicates the genes used for training.
+
+            colname_classes (str): the name of the column in .obs that
+             indicates the cell types (classes).
+             Negative controls should be named '__NegativeControl' which is the
+             default name of negative controls generated
+             by pytacs.data.AnnDataPreparer.
+
+        Return:
+            self (Model): a trained model (self).
+        """
+        X_y_ready: dict = super().fit(
+            sn_adata=sn_adata,
+            colname_classes=colname_classes
+            )
+        n_classes: int = len(self._classes)
+        Y_onehot: _np.ndarray[bool] = _np.zeros(
+            shape=(X_y_ready['X'].shape[0], n_classes),
+            dtype=bool
+            )
+        for i_sample, y in enumerate(X_y_ready['y']):
+            Y_onehot[i_sample, y] = True
+        self._model.fit(
+            X=X_y_ready['X'],
+            Y=Y_onehot
+        )
+        return self
+    
+    def predict_proba(self,
+                      X: _np.ndarray | _csr_matrix,
+                      genes: Iterable[str] | None = None
+                      ) -> _np.ndarray[float]:
+        """Predicts the probabilities for each
+        sample to be of each class.
+
+        Args:
+            X (_np.ndarray | _csr_matrix): input count matrix.
+
+            genes (Iterable[str] | None): list of genes corresponding to
+             X's columns. If None, set to pretrained snRNA-seq's gene list.
+
+        Return:
+            2darray[float]: probs of falling into each class;
+             each row is a sample and each column is a class."""
+        X_ready: _np.ndarray = super().predict_proba(X, genes)['X']
+        probas_binary: list[_np.ndarray[float]] = self._model.predict_proba(X=X_ready)
+        assert type(probas_binary) is list, "Too few classes!"  # This assertion
+        # should never raise error.
+        n_classes: int = len(self.classes)
+        probas: _np.ndarray[float] = _np.zeros(
+            shape=(X_ready.shape[0], n_classes)
+        )
+        for i_sample in range(X_ready.shape[0]):
+            for j_class in range(n_classes):
+                probs = probas_binary[j_class][i_sample, 1]
+                probas[i_sample, j_class] = _np.max(probs)
+        return probas
+    
+    def predict(self,
+                X: _np.ndarray | _csr_matrix,
+                genes: Iterable[str] | None = None
+                ) -> _np.ndarray[int]:
+        """Predicts classes of each sample. For example, if prediction is i,
+         then the predicted class is self.classes[i].
+         For those below confidence threshold,
+         predicted classes are set to -1.
+
+        Args:
+            X (_np.ndarray | _csr_matrix): input count matrix.
+
+            genes (Iterable[str] | None): list of genes corresponding to
+             those of X's columns. If None, set to pretrained gene list.
+
+        Return:
+            _np.ndarray[int]: an array of predicted classIds."""
+        
         return super().predict(X, genes)

@@ -7,8 +7,9 @@ Ideas are based on (Benjamin et al., 2024)'s work TopACT (see https://gitlab.com
 But Pytacs has improved it in several ways:
 
 1. The shape of predicted cells are diverse rather than a rectangle/grid;
-2. Negative-control samples are introduced for better performance of local classifier SVM;
-3. Provides a more generalized input-output protocol (based on h5ad format / scanpy object), and users can get integrated single-cell ST output data (in h5ad format) conveniently.
+2. Provides two types of local classifiers: SVM and Gaussian Mixed Model (GMM);
+3. Negative-control samples are introduced for better performance of local classifier (especially SVM);
+4. Provides a more generalized input-output protocol (based on h5ad format / scanpy object), and users can get integrated single-cell ST output data (in h5ad format) conveniently.
 
 ## Requirements
 ```
@@ -21,8 +22,8 @@ scipy == 1.13.1
 ```
 Could install by `$ pip install -r requirements.txt`.
 
-Or for newer version compatiblity of scanpy,
-
+Or for newer version compatibility of scanpy,
+(recommended)
 ```
 # python == 3.12.2
 numpy == 1.26.4
@@ -44,7 +45,7 @@ data_prep = ts.AnnDataPreparer(sn_adata, sp_adata)
 data_prep.simulate_negative_control()
 data_prep.normalize()
 
-# Step 2. Train a local classifer
+# Step 2. Train a local classifier
 clf = ts.LocalClassifier()
 clf.fit(data_prep.sn_adata_withNegativeControl)
 
@@ -61,13 +62,13 @@ single_cell = sph.run_getSingleCellAnnData()
 
 ## Issues
 
-1. The spatial coordiates by convention should have been saved in `.obsm`
+1. The spatial coordinates by convention should have been saved in `.obsm`
 because `'x'` and `'y'` are interrelated. But in this tool they are expected to be
 put separately as columns in `.obs`. This might be a break of convention that
 needs addressing in the future.
 
 2. The local classifiers now only support SVMs, and are badly encapsulated. Need improving.
 
-    2.1 Add gaussian mixed model which needs no negative control.
+    2.1 Add Gaussian mixed model which needs no negative control.
     
     2.2 Rewrite abstract class for `LocalClassifier`. Write `SVM(LocalClassifier)` and `GaussMixed(LocalClassifier)`.

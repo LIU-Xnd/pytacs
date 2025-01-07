@@ -2,7 +2,7 @@ from scanpy import AnnData as _AnnData
 import numpy as _np
 from scipy.sparse import csr_matrix as _csr_matrix
 from scipy.spatial import distance_matrix as _distance_matrix
-from .classifier import LocalClassifier as _LocalClassifier
+from .classifier import _LocalClassifier
 from .utils import radial_basis_function as _rbf
 
 from .utils import _UNDEFINED
@@ -162,6 +162,8 @@ class SpatialHandler:
     ) -> _np.ndarray:
         """Returns a 1d-array of counts of genes."""
         idxs_filtration = _np.array(filtration)
+        if type(self.adata_spatial.X) is _np.ndarray:
+            return self.adata_spatial.X[idxs_filtration,:].sum(axis=0)
         return self.adata_spatial.X.toarray()[idxs_filtration,:].sum(axis=0)
 
     def _compute_confidence_of_level(
@@ -249,7 +251,7 @@ class SpatialHandler:
                 confident_count += 1
                 class_count[label] = class_count.get(label, 0) + 1
             if verbose and i_iter % 5 == 0:
-                print(f"Spot {ix_centroid} | confidence: {conf*100:.3f}% | confident total: {confident_count} | class: {label}")
+                print(f"Spot {ix_centroid} | confidence: {conf:.3e} | confident total: {confident_count} | class: {label}")
                 print(f"Classes total: {class_count}")
             coverage = (self.mask_newIds>-1).sum() / len(self.mask_newIds)
             if verbose and i_iter % 5 == 0:

@@ -69,6 +69,7 @@ def subCountMatrix_genes2InGenes1(X: _np.ndarray, genes1: list[str], genes2: lis
              ['Malat1', 'Cgnl1', 'Golga4'], where X's ['Golga4'] column is set to 0 due
              to absence."""
     idx_subgenes = _indices_of_ls1ElementInLst2(list(genes1), list(genes2))
+    # print(f"{len(idx_subgenes)=}")
     return _np.concatenate(
         [X, _np.zeros((X.shape[0],1), dtype=int)], # those not shown set to 0
         axis=1,

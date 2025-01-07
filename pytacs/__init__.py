@@ -21,12 +21,17 @@
 
 # Updates v1.0.0:
 # - classifier base class: LocalClassifier [v]
-#   + Submodel: SVM []
-#   + Submodel: GMM []
+#   + Submodel: SVM [v]
+#   + Submodel: GMM [v]
 # - Future:
 #   + Image based local classifier (CellPose + TopACT)
 
-__version__ = "1.0.0"
+# Updates v1.0.2:
+# - Rename LocalClassifier -> _LocalClassifier [v]
+# - Rewrite GaussianNaiveBayes and deprecated the old
+#  one -> GaussianNaiveBayes_RelProbs [v]
+
+__version__ = "1.0.2"
 
 from .data import AnnDataPreparer
 from .classifier import SVM, GaussianNaiveBayes

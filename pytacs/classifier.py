@@ -5,14 +5,15 @@ from sklearn.multioutput import MultiOutputClassifier as _MultiOutputClassifier
 
 from scanpy import AnnData as _AnnData
 import numpy as _np
+from scipy.stats import norm as _norm
 from scipy.sparse import csr_matrix as _csr_matrix
-from typing import Literal, Iterable
+from typing import Iterable
 from .utils import _UNDEFINED, _Undefined
 from .utils import subCountMatrix_genes2InGenes1 as _get_subCountMatrix
 
 
 # >>> ---- Local Classifier ----
-class LocalClassifier:
+class _LocalClassifier:
     """This classifier would predict probabilities for each class, as well as
      the negative-control class (the last class), if generated.
 
@@ -163,7 +164,8 @@ class LocalClassifier:
             genes) == X.shape[1], "genes must be compatible with X.shape[1]"
         # Select those genes that appear in self._genes
         X_new = _get_subCountMatrix(X, self._genes, genes)
-        return dict(X=X_new)
+        # print(f"{X_new.shape=}")
+        return {'X': X_new}
 
     def predict(
         self,
@@ -199,7 +201,7 @@ class LocalClassifier:
 # ---- Local Classifier ---- <<<
 
 
-class SVM(LocalClassifier):
+class SVM(_LocalClassifier):
     """Based on sklearn.svm.SVC (See relevant reference there),
      specially built for snRNA-seq data training.
     This classifier would predict probabilities for each class, as well as
@@ -328,10 +330,12 @@ class SVM(LocalClassifier):
         return super().predict(X, genes)
 
 
-class GaussianNaiveBayes(LocalClassifier):
-    """This classifier based on Gaussian Naive Bayes models would predict
-     probabilities for each class, as well as
-     the negative-control class (the last class, but not necessary),
+class GaussianNaiveBayes_RelProbs(_LocalClassifier):
+    """DEPRECATED
+
+    This classifier based on Gaussian Naive Bayes models would predict
+     (relative) probabilities for each class, as well as
+     the negative-control class (the last class),
      if generated.
 
     .fit(), .predict(), and .predict_proba() are specially built, but
@@ -341,7 +345,7 @@ class GaussianNaiveBayes(LocalClassifier):
 
     For other parameters related to GaussianNB, see reference at
      `sklearn.naive_bayes.GaussianNB`.
-    
+
     Args
     ----------
     threshold_confidence : float, default=0.75
@@ -349,15 +353,16 @@ class GaussianNaiveBayes(LocalClassifier):
         to be in a class.
     """
 
-    def __init__(self, threshold_confidence = 0.75, **kwargs):
+    def __init__(self, threshold_confidence=0.75, **kwargs):
+        print(
+            "Deprecation Warning: This model is deprecated! Use GaussianNaiveBayes instead."
+        )
         super().__init__(threshold_confidence=threshold_confidence)
         gnb = _GaussianNB(**kwargs)
         self._model = _MultiOutputClassifier(estimator=gnb)
         return None
-    
-    def fit(self,
-            sn_adata: _AnnData,
-            colname_classes: str = "cell_type"):
+
+    def fit(self, sn_adata: _AnnData, colname_classes: str = "cell_type"):
         """Trains the local classifier using the AnnData (h5ad) format
         snRNA-seq data.
 
@@ -378,26 +383,20 @@ class GaussianNaiveBayes(LocalClassifier):
             self (Model): a trained model (self).
         """
         X_y_ready: dict = super().fit(
-            sn_adata=sn_adata,
-            colname_classes=colname_classes
-            )
+            sn_adata=sn_adata, colname_classes=colname_classes
+        )
         n_classes: int = len(self._classes)
         Y_onehot: _np.ndarray[bool] = _np.zeros(
-            shape=(X_y_ready['X'].shape[0], n_classes),
-            dtype=bool
-            )
-        for i_sample, y in enumerate(X_y_ready['y']):
-            Y_onehot[i_sample, y] = True
-        self._model.fit(
-            X=X_y_ready['X'],
-            Y=Y_onehot
+            shape=(X_y_ready["X"].shape[0], n_classes), dtype=bool
         )
+        for i_sample, y in enumerate(X_y_ready["y"]):
+            Y_onehot[i_sample, y] = True
+        self._model.fit(X=X_y_ready["X"], Y=Y_onehot)
         return self
-    
-    def predict_proba(self,
-                      X: _np.ndarray | _csr_matrix,
-                      genes: Iterable[str] | None = None
-                      ) -> _np.ndarray[float]:
+
+    def predict_proba(
+        self, X: _np.ndarray | _csr_matrix, genes: Iterable[str] | None = None
+    ) -> _np.ndarray[float]:
         """Predicts the probabilities for each
         sample to be of each class.
 
@@ -410,24 +409,24 @@ class GaussianNaiveBayes(LocalClassifier):
         Return:
             2darray[float]: probs of falling into each class;
              each row is a sample and each column is a class."""
-        X_ready: _np.ndarray = super().predict_proba(X, genes)['X']
-        probas_binary: list[_np.ndarray[float]] = self._model.predict_proba(X=X_ready)
-        assert type(probas_binary) is list, "Too few classes!"  # This assertion
+        X_ready: _np.ndarray = super().predict_proba(X, genes)["X"]
+        probas_binary: list[_np.ndarray[float]
+                            ] = self._model.predict_proba(X=X_ready)
+        # This assertion
+        assert type(probas_binary) is list, "Too few classes!"
         # should never raise error.
         n_classes: int = len(self.classes)
         probas: _np.ndarray[float] = _np.zeros(
-            shape=(X_ready.shape[0], n_classes)
-        )
+            shape=(X_ready.shape[0], n_classes))
         for i_sample in range(X_ready.shape[0]):
             for j_class in range(n_classes):
                 probs = probas_binary[j_class][i_sample, 1]
                 probas[i_sample, j_class] = _np.max(probs)
         return probas
-    
-    def predict(self,
-                X: _np.ndarray | _csr_matrix,
-                genes: Iterable[str] | None = None
-                ) -> _np.ndarray[int]:
+
+    def predict(
+        self, X: _np.ndarray | _csr_matrix, genes: Iterable[str] | None = None
+    ) -> _np.ndarray[int]:
         """Predicts classes of each sample. For example, if prediction is i,
          then the predicted class is self.classes[i].
          For those below confidence threshold,
@@ -441,5 +440,120 @@ class GaussianNaiveBayes(LocalClassifier):
 
         Return:
             _np.ndarray[int]: an array of predicted classIds."""
-        
+
         return super().predict(X, genes)
+
+
+class GaussianNaiveBayes(_LocalClassifier):
+    """This classifier based on Gaussian Naive Bayes models would predict
+     (bi-tail cumulative) probabilities for each class, as well as
+     the negative-control class (the last class, but not necessary),
+     if generated.
+
+    .fit(), .predict(), and .predict_proba() are specially built, but
+     often the last two methods are not to be called manually.
+
+    Predicted integer i indicates the class self._classes[i].
+
+    For other parameters related to GaussianNB, see reference at
+     `sklearn.naive_bayes.GaussianNB`.
+
+    Args
+    ----------
+    threshold_confidence : float, default=0.75
+        Confidence according to which whether the classifier predicts a sample
+        to be in a class.
+    """
+
+    def __init__(self, threshold_confidence=0.75, **kwargs):
+        super().__init__(threshold_confidence=threshold_confidence)
+        self._model = _GaussianNB(**kwargs)
+        return None
+
+    @staticmethod
+    def _gaussian_tail_probability(x_obs: float, mean: float, var: float) -> float:
+        """Calculate the two-tail probability for
+        each feature (assuming Gaussian distribution)"""
+        return 1 - _np.abs(2 * _norm.cdf(x_obs, loc=mean, scale=_np.sqrt(var)) - 1)
+
+    def fit(self, sn_adata: _AnnData, colname_classes: str = "cell_type"):
+        """Trains the local classifier using the AnnData (h5ad) format
+        snRNA-seq data.
+
+        Args:
+            sn_adata (AnnData): snRNA-seq h5ad data. Must have attributes:
+             .X, the sample-by-gene count matrix;
+             .obs['cell_type'] or named otherwise, that indicates the label of
+             each sample;
+             .var, whose index indicates the genes used for training.
+
+            colname_classes (str): the name of the column in .obs that
+             indicates the cell types (classes).
+             Negative controls should be named '__NegativeControl' which is the
+             default name of negative controls generated
+             by pytacs.data.AnnDataPreparer.
+
+        Return:
+            self (Model): a trained model (self).
+        """
+        X_y_ready: dict = super().fit(
+            sn_adata=sn_adata, colname_classes=colname_classes
+        )
+        self._model.fit(X=X_y_ready["X"], y=X_y_ready["y"])
+        return self
+
+    def predict_proba(
+        self, X: _np.ndarray | _csr_matrix, genes: Iterable[str] | None = None
+    ) -> _np.ndarray[float]:
+        """Predicts the tail probabilities for each
+        sample to be of each class.
+
+        Args:
+            X (_np.ndarray | _csr_matrix): input count matrix.
+
+            genes (Iterable[str] | None): list of genes corresponding to
+             X's columns. If None, set to pretrained snRNA-seq's gene list.
+
+        Return:
+            2darray[float]: probs of falling into each class;
+             each row is a sample and each column is a class."""
+        X_ready: _np.ndarray = super().predict_proba(X, genes)["X"]
+        tail_probabilities = _np.zeros(
+            shape=(X_ready.shape[0], self._model.classes_.shape[0])
+        )
+        # print(f"{self._model.theta_.shape=}")
+        # print(f"{self._model.classes_=}")
+        # print(f"{X_ready.shape[1]=}")
+        for i, sample in enumerate(X_ready):
+            for j, class_id in enumerate(self._model.classes_):
+                tail_probs = [
+                    GaussianNaiveBayes._gaussian_tail_probability(
+                        x_obs=sample[k],
+                        mean=self._model.theta_[j, k],
+                        var=self._model.var_[j, k]
+                    ) for k in range(X_ready.shape[1])
+                ]  # for each feature.
+                tail_probabilities[i, j] = _np.prod(
+                    tail_probs
+                )  # Assuming independence across features
+        return tail_probabilities
+
+    def predict(
+        self, X: _np.ndarray | _csr_matrix, genes: Iterable[str] | None = None
+    ) -> _np.ndarray[int]:
+        """Predicts classes of each sample. For example, if prediction is i,
+         then the predicted class is self.classes[i].
+         For those below confidence threshold,
+         predicted classes are set to -1.
+
+        Args:
+            X (_np.ndarray | _csr_matrix): input count matrix.
+
+            genes (Iterable[str] | None): list of genes corresponding to
+             those of X's columns. If None, set to pretrained gene list.
+
+        Return:
+            _np.ndarray[int]: an array of predicted classIds."""
+
+        return super().predict(X, genes)
+

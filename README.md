@@ -42,12 +42,10 @@ import pytacs as ts
 
 # Step 1. Prepare the snRNA-seq and spRNA-seq data
 data_prep = ts.AnnDataPreparer(sn_adata, sp_adata)
-data_prep.simulate_negative_control()
-data_prep.normalize()
 
 # Step 2. Train a local classifier
-clf = ts.LocalClassifier()
-clf.fit(data_prep.sn_adata_withNegativeControl)
+clf = ts.GaussianNaiveBayes()
+clf.fit(data_prep.sn_adata)
 
 # Step 3. Integrate spatial spots into single-cell spots
 sph = ts.SpatialHandler(data_prep.sp_adata, clf)
@@ -60,15 +58,19 @@ single_cell = sph.run_getSingleCellAnnData()
 ## Demo
 [demo.ipynb](./demo.ipynb)
 
-## Issues
+## Issues & To-dos
 
-1. The spatial coordinates by convention should have been saved in `.obsm`
+- The spatial coordinates by convention should have been saved in `.obsm`
 because `'x'` and `'y'` are interrelated. But in this tool they are expected to be
 put separately as columns in `.obs`. This might be a break of convention that
 needs addressing in the future.
 
-2. The local classifiers now only support SVMs, and are badly encapsulated. Need improving.
+- Gaussian Naive Bayes model has been implemented, but this model has issues with predicted probs (see below).
 
-    2.1 Add Gaussian mixed model which needs no negative control.
-    
-    2.2 Rewrite abstract class for `LocalClassifier`. Write `SVM(LocalClassifier)` and `GaussMixed(LocalClassifier)`.
+- Default predicted probabilities (`.predict_proba()`) are relative probs,
+that is, the sum of which is always one. We do not want this, unless negative controls are introduced.
+    - A better approach, in the case of Gaussian model, is to use the (bi-)tail probs as predicted probs, which do not necessarily sum to 1. And it does not require negative controls.
+    - Changed the old model's name (`GaussianNaiveBayes`) to `GaussianNaiveBayes_RelProbs` and it will deprecate.
+    - Defined a new model named `GaussianNaiveBayes` which predicts tail-probs instead of relative probs for each class.
+
+- Rewrote abstract class for `_LocalClassifier`. Write `SVM(_LocalClassifier)` and `GaussianNaiveBayes(_LocalClassifier)`.

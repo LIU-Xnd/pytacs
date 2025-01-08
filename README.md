@@ -57,20 +57,3 @@ single_cell = sph.run_getSingleCellAnnData()
 
 ## Demo
 [demo.ipynb](./demo.ipynb)
-
-## Issues & To-dos
-
-- The spatial coordinates by convention should have been saved in `.obsm`
-because `'x'` and `'y'` are interrelated. But in this tool they are expected to be
-put separately as columns in `.obs`. This might be a break of convention that
-needs addressing in the future.
-
-- Gaussian Naive Bayes model has been implemented, but this model has issues with predicted probs (see below).
-
-- Default predicted probabilities (`.predict_proba()`) are relative probs,
-that is, the sum of which is always one. We do not want this, unless negative controls are introduced.
-    - A better approach, in the case of Gaussian model, is to use the (bi-)tail probs as predicted probs, which do not necessarily sum to 1. And it does not require negative controls.
-    - Changed the old model's name (`GaussianNaiveBayes`) to `GaussianNaiveBayes_RelProbs` and it will deprecate.
-    - Defined a new model named `GaussianNaiveBayes` which predicts tail-probs instead of relative probs for each class.
-
-- Rewrote abstract class for `_LocalClassifier`. Write `SVM(_LocalClassifier)` and `GaussianNaiveBayes(_LocalClassifier)`.

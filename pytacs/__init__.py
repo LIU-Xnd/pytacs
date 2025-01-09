@@ -25,6 +25,7 @@
 # Future:
 # - Add param standardize_PCs (bool) to QProximityClassifier to scale
 #  different PC dimensions for proximity balls to work better.
+# - Add param n_cells_add_per_step to SpatialHandler to speed up.
 # - Add params normalize, log1p, on_PCs, n_PCs to classifier.SVM.
 # - Write __repr__ for _LocalClassifier and its child classes.
 # - Improve run_getSingleCellAnnData()

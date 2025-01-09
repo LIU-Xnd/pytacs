@@ -432,7 +432,7 @@ class GaussianNaiveBayes(_LocalClassifier):
         if self._on_PCs:
             # Non-centered PCA
             self._PC_loadings = _np.real(  # in case it is complex, but barely
-                _np.linalg.svd(a=X_y_ready['X'],
+                _np.linalg.svd(a=X_ready,
                         full_matrices=False,
                         compute_uv=True,
                         hermitian=False).Vh  # the loading matrix, PC by gene
@@ -444,7 +444,7 @@ class GaussianNaiveBayes(_LocalClassifier):
     def predict_proba(
         self, X: _np.ndarray | _csr_matrix, genes: Iterable[str] | None = None
     ) -> _np.ndarray[float]:
-        """Predicts the tail probabilities for each
+        """Predicts the probabilities for each
         sample to be of each class.
 
         Args:
@@ -471,10 +471,10 @@ class GaussianNaiveBayes(_LocalClassifier):
             return self._model.predict_proba(X_ready)
         
         tail_probabilities = _np.zeros(
-            shape=(X_ready.shape[0], self._model.classes_.shape[0])
+            shape=(X_ready.shape[0], len(self._classes))
         )
         for i, sample in enumerate(X_ready):
-            for j, class_id in enumerate(self._model.classes_):
+            for j, cls_name in enumerate(self._classes):
                 tail_probs = [
                     GaussianNaiveBayes._gaussian_tail_probability(
                         x_obs=sample[k],
@@ -511,3 +511,232 @@ class GaussianNaiveBayes(_LocalClassifier):
 
         return super().predict(X, genes)
 
+class QProximityClassifier(_LocalClassifier):
+    """This classifier based on q-proximity confidence metric would predict
+     probabilities for each class, as well as
+     the negative-control class (the last class, but not necessary),
+     if generated.
+    
+    .fit(), .predict(), and .predict_proba() are specially built, but
+     often the last two methods are not to be called manually.
+
+    Predicted integer i indicates the class self._classes[i].
+
+    The proximity radius R(i,q) of class i
+    and of quantile q (0 < q < 1) is defined as the minimal r where the ball
+    centered at class i's mean vector mu_i with radius r, Ball(mu_i, r),
+    contains a proportion of q points in class i. (q<1 to avoid outliers)
+
+    The q-proximity of point x to
+    class i, prox_q(x,i), is defined as the cardinality of the intersection
+    of Ball(x, R(i,q)) with the set of all points in class i, X_i,
+    divided by q * cardinality(X_i), i.e.,
+    prox_q(x,i) := cardinality(Ball(x, R(i,q)) & X_i) / (q*cardinality(X_i))
+
+    Args
+    ----------
+    threshold_confidence : float, default=0.75
+        Confidence according to which whether the classifier predicts a sample
+        to be in a class.
+    
+    normalize: bool, default=False
+        Will process row normalization first.
+        (Not in-place. Will not affect spot integration - it will sum up
+        raw counts first, and then process normalization.)
+        
+    log1p: bool, default=True
+        Will process log(1+x) transform on gene count matrix.
+        (Not in-place. Will not affect spot integration - it will sum up
+        raw counts first, and then process normalization (if specified), and
+        then log1p.)
+    
+    on_PCs: bool, default=True
+        Uses PCs (transform matrix generated from sn_adata, not zero-centered)
+        instead of raw genes as the predictors.
+    
+    n_PCs: int, default=10
+        Number of PCs to use as predictors. Ignored if `on_PCs` is False.
+
+    q: float, default=0.85
+        quantile (q), the proportion of points contained by the proximity ball.
+        0 < q < 1.
+    
+    capped: bool, default=True
+        To avoid potential cases where prox_q > 1, we can use
+        capped prox_q(x,i) :=
+        min(1, prox_q(x,i)) as the confidence metric.
+    """
+
+    def __init__(self, threshold_confidence: float = 0.75,
+                 log1p: bool = True,
+                 normalize: bool = False,
+                 on_PCs: bool = True,
+                 n_PCs: int = 10,
+                 q: float = 0.85,
+                 capped: bool = True,
+                 **kwargs):
+        super().__init__(threshold_confidence=threshold_confidence)
+        # The ._model_points is a dict mapping class_id to processed sample
+        # matrix of that class. 
+        self._model_points: dict[(int, _np.ndarray)] = dict()
+        # The ._model_radii is a dict mapping class_id to radius of proximity
+        # ball of that class.
+        self._model_radii: dict[(int, float)] = dict()
+        # The ._model_n_points_keep is a dict mapping class_id to number of
+        # points to keep for a ball in that class
+        self._model_n_points_keep: dict[(int, int)] = dict()
+
+        self._normalize: bool = normalize
+        self._log1p: bool = log1p
+        self._PC_loadings: _np.ndarray | _Undefined = _UNDEFINED
+        self._n_PCs: int = n_PCs if on_PCs else 0
+        self._on_PCs: bool = on_PCs
+        self._q: float = q
+        
+        self._capped: bool = capped
+        return None
+    
+    def fit(
+            self,
+            sn_adata: _AnnData,
+            colname_classes: str = 'cell_type'
+    ):
+        """Trains the local classifier using the AnnData (h5ad) format
+        snRNA-seq data.
+
+        Args:
+            sn_adata (AnnData): snRNA-seq h5ad data. Must have attributes:
+             .X, the sample-by-gene count matrix;
+             .obs['cell_type'] or named otherwise, that indicates the label of
+             each sample;
+             .var, whose index indicates the genes used for training.
+
+            colname_classes (str): the name of the column in .obs that
+             indicates the cell types (classes).
+             Negative controls should be named '__NegativeControl' which is the
+             default name of negative controls generated
+             by pytacs.data.AnnDataPreparer.
+
+        Return:
+            self (Model): a trained model (self).
+        """
+        X_y_ready: dict = super().fit(
+            sn_adata=sn_adata,
+            colname_classes=colname_classes
+        )
+        X_ready: _np.ndarray = X_y_ready['X']
+
+        if self._normalize:
+            X_ready = 1e4 * _np.divide(
+                X_ready,
+                _np.sum(X_ready, axis=1).reshape(-1,1)
+                )
+        if self._log1p:
+            X_ready = _np.log1p(X_ready)
+        if self._on_PCs:
+            # Non-centered PCA
+            self._PC_loadings = _np.real(  # in case it is complex, but barely
+                _np.linalg.svd(a=X_ready,
+                        full_matrices=False,
+                        compute_uv=True,
+                        hermitian=False).Vh  # the loading matrix, PC by gene
+                        )[:self._n_PCs, :]
+            X_ready = X_ready @ self._PC_loadings.T
+        
+        # "Train" the model
+        for i_cls, cls_name in enumerate(self.classes):
+            # Save the points belonging to this class
+            self._model_points[i_cls] = X_ready[X_y_ready['y']==i_cls,:].copy()
+            # Find centroid
+            n_points: int = self._model_points[i_cls].shape[0]
+            mean_vector = self._model_points[i_cls].sum(axis=0) / n_points
+            # Calculate distances of points to mean vector
+            distances_to_mean = _np.zeros(shape=(n_points,))
+            for i_point, point in enumerate(self._model_points[i_cls]):
+                distances_to_mean[i_point] = _np.linalg.norm(point-mean_vector)
+            # Points from near to far
+            ix_from_near_to_far = _np.argsort(distances_to_mean)
+            n_points_keep: int = int(_np.round(n_points * self._q))
+            n_points_keep = max(n_points_keep, 1)
+            self._model_n_points_keep[i_cls] = n_points_keep
+            # Point at the ball boundary
+            i_support_point: int = ix_from_near_to_far[n_points_keep-1]
+            radius_q: float = distances_to_mean[i_support_point]
+            self._model_radii[i_cls] = radius_q
+        return self
+    
+    def predict_proba(
+        self, X: _np.ndarray | _csr_matrix, genes: Iterable[str] | None = None
+    ) -> _np.ndarray[float]:
+        """Predicts the probabilities for each
+        sample to be of each class.
+
+        Args:
+            X (_np.ndarray | _csr_matrix): input count matrix.
+
+            genes (Iterable[str] | None): list of genes corresponding to
+             X's columns. If None, set to pretrained snRNA-seq's gene list.
+
+        Return:
+            2darray[float]: probs of falling into each class;
+             each row is a sample and each column is a class."""
+        X_ready: _np.ndarray = super().predict_proba(X, genes)["X"]
+        if self._normalize:
+            X_ready = 1e4 * _np.divide(
+                X_ready,
+                _np.sum(X_ready, axis=1).reshape(-1,1)
+                )
+        if self._log1p:
+            X_ready = _np.log1p(X_ready)
+        if self._on_PCs:
+            X_ready = X_ready @ self._PC_loadings.T
+        
+
+        # Probs
+        probs = _np.zeros(shape=(X_ready.shape[0], len(self._classes)))
+        for i_class, cls_name in enumerate(self._classes):
+            # Compute distances of each sample to each ref points in the class
+            dist_matrix = _np.zeros(
+                shape=(X_ready.shape[0],
+                       self._model_points[i_class].shape[0]
+                )
+            )
+            for i_sample, sample in enumerate(X_ready):
+                for i_refpoint, refpoint in enumerate(
+                    self._model_points[i_class]
+                ):
+                    dist_matrix[i_sample, i_refpoint] = _np.linalg.norm(
+                        sample - refpoint
+                    )
+                # Count proximal points
+                n_proximal = _np.sum(
+                    dist_matrix[i_sample,:] <= self._model_radii[i_class]
+                )
+                probs[i_sample, i_class] = n_proximal / self._model_n_points_keep[i_class]
+                if self._capped:
+                    probs[i_sample, i_class] = min(
+                        probs[i_sample, i_class], 1
+                    )
+        
+        return probs
+    
+    def predict(
+        self, X: _np.ndarray | _csr_matrix, genes: Iterable[str] | None = None
+    ) -> _np.ndarray[int]:
+        """Predicts classes of each sample. For example, if prediction is i,
+         then the predicted class is self.classes[i].
+         For those below confidence threshold,
+         predicted classes are set to -1.
+
+        Args:
+            X (_np.ndarray | _csr_matrix): input count matrix.
+
+            genes (Iterable[str] | None): list of genes corresponding to
+             those of X's columns. If None, set to pretrained gene list.
+
+        Return:
+            _np.ndarray[int]: an array of predicted classIds."""
+
+        return super().predict(X, genes)
+    
+                

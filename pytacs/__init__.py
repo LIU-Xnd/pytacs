@@ -4,28 +4,8 @@
 
 # Author: Liu X., 2024.12
 
-# Updates v1.0.3:
-# - GaussianNaiveBayes has many versions in terms of
-#  probs calculation (relative probs, two-tail multiplied probs, and
-#  this version's average probs). The former two versions of probs
-#  are not stable when
-#  all the many genes (features) are used and when there are dropouts.
-#  Because one single outlier feature (e.g. a dropout) can cause the
-#  resulting two-tail (cumulative) prob to be nearly zero. And so will
-#  the relative probs be a lot less accurate. To address this issue, we
-#  can consider using the average prob of features instead of the
-#  cumulative one as the confidence metric to avoid the effect of outlier
-#  features, which leads to this version's
-#  GaussianNaiveBayes_AveProbs. We will integrate all the three versions of
-#  GaussianNaiveBayes local classifiers into one class with an optional
-#  version parameter.
-#  Moreover, we should consider using the PCs (or some of the embedded
-#  components of the features) instead of all the features (genes) as
-#  predictors, which leads to this version's
-#  GaussianNaiveBayes(on_PCs=True) option.
-
-# Future:
-# - (Expected in v1.0.4) To address effect of outliers from snRNA-seq data,
+# Updates v1.0.4:
+# - To address effect of outliers from snRNA-seq data,
 #  we propose the "q-proximity confidence metric".
 #  The proximity radius R(i,q) of class i
 #  and of quantile q (0 < q < 1) is defined as the minimal r where the ball
@@ -41,20 +21,25 @@
 #   + This metric does not assume any prior distribution of data and can
 #    robustly measure the confidence of identity of cells.
 #   + The corresponding classifier is call QProxmityClassifier.
-# 
+
+# Future:
+# - Add param standardize_PCs (bool) to QProximityClassifier to scale
+#  different PC dimensions for proximity balls to work better.
+# - Add params normalize, log1p, on_PCs, n_PCs to classifier.SVM.
+# - Write __repr__ for _LocalClassifier and its child classes.
 # - Improve run_getSingleCellAnnData()
-#    + Add: Coordinate remapping []
-#    + Add: Shape smoothing [] (if a spot is surrounded by spots of the same
+#    + Add: Coordinate remapping
+#    + Add: Shape smoothing (if a spot is surrounded by spots of the same
 #    class, then make it of that class, too)
-# - Improve documentations []
-# - Image based local classifier (CellPose + TopACT) []
+# - Improve documentations
+# - Image based local classifier (CellPose + TopACT)
 # - The spatial coordinates by convention should have been saved in `.obsm`
 #  because `'x'` and `'y'` are related. But in this tool they are expected to be
 #  put separately as columns in `.obs`. This might be a break of convention that
-#  needs addressing in the future. []
+#  needs addressing in the future.
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 
 from .data import AnnDataPreparer
-from .classifier import SVM, GaussianNaiveBayes
+from .classifier import SVM, GaussianNaiveBayes, QProximityClassifier
 from .spatial import SpatialHandler

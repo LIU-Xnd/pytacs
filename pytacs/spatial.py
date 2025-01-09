@@ -30,8 +30,11 @@ class SpatialHandler:
         # mask on each old sample. -1 for not assigned; otherwise the new id.
         
         self.__classes_new = dict()
+        # new id -> new class
+
         self.__confidences_new = dict()
-        
+        # new id -> confidence
+
         self.cache_distance_matrix: _np.ndarray = _UNDEFINED
         self.cache_singleCellAnnData: _AnnData = _UNDEFINED
         return None
@@ -299,8 +302,28 @@ Coverage: {coverage*100:.2f}%
             self.cache_singleCellAnnData = sc_adata
         return sc_adata
 
+    def get_spatial_classes(self) -> _np.ndarray[int]:
+        """Get an array of integers, corresponding to class ids of each (old) sample."""
+        res = _np.zeros(shape=(self.adata_spatial.shape[0],),
+                        dtype=int
+                        )
+        for i_sample in range(len(res)):
+            new_id = self.mask_newIds[i_sample]
+            if new_id == -1:
+                res[i_sample] = -1
+                continue
+            new_class = self.classes_new[i_sample]
+            res[i_sample] = new_class
+        return res
+
     def run_plotClasses(self):
-        pass
+        import seaborn as sns
+        spatial_classes = self.get_spatial_classes()
+        return sns.scatterplot(
+            x=self.adata_spatial.obs['x'].values,
+            y=self.adata_spatial.obs['y'].values,
+            hue=spatial_classes,
+        )
 
     def run_plotNewIds(self):
         pass

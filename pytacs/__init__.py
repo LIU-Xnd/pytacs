@@ -2,7 +2,7 @@
 #  an improved version of TopACT (https://gitlab.com/kfbenjamin/topact)
 #  implementation.
 
-# Author: Liu X., 2024
+# Author: Liu X., 2024.12
 
 # Updates v1.0.3:
 # - GaussianNaiveBayes has many versions in terms of

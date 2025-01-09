@@ -7,23 +7,12 @@ Ideas are based on (Benjamin et al., 2024)'s work TopACT (see https://gitlab.com
 But Pytacs has improved it in several ways:
 
 1. The shape of predicted cells are diverse rather than a rectangle/grid;
-2. Provides two types of local classifiers: SVM and Gaussian Mixed Model (GMM);
-3. Negative-control samples are introduced for better performance of local classifier (especially SVM);
-4. Provides a more generalized input-output protocol (based on h5ad format / scanpy object), and users can get integrated single-cell ST output data (in h5ad format) conveniently.
+2. Provides more types of local classifiers, including Gaussian Naive Bayes Model and q-Proximity Confidence Model;
+3. New strategies are introduced to build a local classifier;
+4. Negative-control samples are introduced for better performance of local classifier (especially SVM);
+5. Provides a more generalized input-output protocol (based on h5ad format / scanpy object), and users can get integrated single-cell ST output data (in h5ad format) conveniently.
 
 ## Requirements
-```
-# python == 3.10.15
-numpy == 1.26.4
-pandas == 1.5.3
-scanpy == 1.9.6
-scikit-learn == 1.5.1
-scipy == 1.13.1
-```
-Could install by `$ pip install -r requirements.txt`.
-
-Or for newer version compatibility of scanpy,
-(recommended)
 ```
 # python == 3.12.2
 numpy == 1.26.4
@@ -32,12 +21,10 @@ scanpy == 1.10.4
 scikit-learn == 1.5.2
 scipy == 1.14.1
 ```
-Could install by `$ pip install -r requirements_py312.txt`.
-
-(Still under construction...)
+Could install by `$ pip install -r requirements.txt`.
 
 ## Usage
-```{python}
+```{Python}
 import pytacs as ts
 
 # Step 1. Prepare the snRNA-seq and spRNA-seq data

@@ -165,7 +165,7 @@ class _LocalClassifier:
         # Select those genes that appear in self._genes
         X_new = _get_subCountMatrix(X, self._genes, genes)
         # print(f"{X_new.shape=}")
-        return {'X': X_new}
+        return {"X": X_new}
 
     def predict(
         self,
@@ -196,6 +196,7 @@ class _LocalClassifier:
         where_notConfident = probas_max < self.threshold_confidence
         classes_pred[where_notConfident] = -1
         return classes_pred
+
 
 # ---- Local Classifier ---- <<<
 
@@ -328,6 +329,7 @@ class SVM(_LocalClassifier):
 
         return super().predict(X, genes)
 
+
 class GaussianNaiveBayes(_LocalClassifier):
     """This classifier based on Gaussian Naive Bayes models would predict
      probabilities for each class, as well as
@@ -347,22 +349,22 @@ class GaussianNaiveBayes(_LocalClassifier):
     threshold_confidence : float, default=0.75
         Confidence according to which whether the classifier predicts a sample
         to be in a class.
-    
+
     normalize: bool, default=False
         Will process row normalization first.
         (Not in-place. Will not affect spot integration - it will sum up
         raw counts first, and then process.)
-        
+
     log1p: bool, default=True
         Will process log(1+x) transform on gene count matrix.
         (Not in-place. Will not affect spot integration - it will sum up
         raw counts first, and then process normalization (if specified), and
         then log1p.)
-    
+
     on_PCs: bool, default=True
         Uses PCs (transform matrix generated from sn_adata, not zero-centered)
         instead of raw genes as the predictors.
-    
+
     n_PCs: int, default=10
         Number of PCs to use as predictors. Ignored if `on_PCs` is False.
 
@@ -375,13 +377,16 @@ class GaussianNaiveBayes(_LocalClassifier):
          (recommended).
     """
 
-    def __init__(self, threshold_confidence: float = 0.75,
-                 log1p: bool = True,
-                 normalize: bool = False,
-                 on_PCs: bool = True,
-                 n_PCs: int = 10,
-                 prob_mode: Literal['relative', 'multiplied', 'average'] = 'average',
-                 **kwargs):
+    def __init__(
+        self,
+        threshold_confidence: float = 0.75,
+        log1p: bool = True,
+        normalize: bool = False,
+        on_PCs: bool = True,
+        n_PCs: int = 10,
+        prob_mode: Literal["relative", "multiplied", "average"] = "average",
+        **kwargs,
+    ):
         super().__init__(threshold_confidence=threshold_confidence)
         self._model = _GaussianNB(**kwargs)
         self._normalize: bool = normalize
@@ -390,7 +395,7 @@ class GaussianNaiveBayes(_LocalClassifier):
         self._n_PCs: int = n_PCs if on_PCs else 0
         self._on_PCs: bool = on_PCs
         self._prob_mode: str = prob_mode
-        assert prob_mode in ['relative', 'multiplied', 'average']
+        assert prob_mode in ["relative", "multiplied", "average"]
         return None
 
     def _gaussian_tail_probability(x_obs: float, mean: float, var: float) -> float:
@@ -421,22 +426,19 @@ class GaussianNaiveBayes(_LocalClassifier):
         X_y_ready: dict = super().fit(
             sn_adata=sn_adata, colname_classes=colname_classes
         )
-        X_ready: _np.ndarray = X_y_ready['X']
+        X_ready: _np.ndarray = X_y_ready["X"]
         if self._normalize:
-            X_ready = 1e4 * _np.divide(
-                X_ready,
-                _np.sum(X_ready, axis=1).reshape(-1,1)
-                )
+            X_ready = 1e4 * \
+                _np.divide(X_ready, _np.sum(X_ready, axis=1).reshape(-1, 1))
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
             # Non-centered PCA
             self._PC_loadings = _np.real(  # in case it is complex, but barely
-                _np.linalg.svd(a=X_ready,
-                        full_matrices=False,
-                        compute_uv=True,
-                        hermitian=False).Vh  # the loading matrix, PC by gene
-                        )[:self._n_PCs, :]
+                _np.linalg.svd(
+                    a=X_ready, full_matrices=False, compute_uv=True, hermitian=False
+                ).Vh  # the loading matrix, PC by gene
+            )[: self._n_PCs, :]
             X_ready = X_ready @ self._PC_loadings.T
         self._model.fit(X=X_ready, y=X_y_ready["y"])
         return self
@@ -458,38 +460,34 @@ class GaussianNaiveBayes(_LocalClassifier):
              each row is a sample and each column is a class."""
         X_ready: _np.ndarray = super().predict_proba(X, genes)["X"]
         if self._normalize:
-            X_ready = 1e4 * _np.divide(
-                X_ready,
-                _np.sum(X_ready, axis=1).reshape(-1,1)
-                )
+            X_ready = 1e4 * \
+                _np.divide(X_ready, _np.sum(X_ready, axis=1).reshape(-1, 1))
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
             X_ready = X_ready @ self._PC_loadings.T
 
-        if self._prob_mode == 'relative':
+        if self._prob_mode == "relative":
             return self._model.predict_proba(X_ready)
-        
+
         tail_probabilities = _np.zeros(
-            shape=(X_ready.shape[0], len(self._classes))
-        )
+            shape=(X_ready.shape[0], len(self._classes)))
         for i, sample in enumerate(X_ready):
             for j, cls_name in enumerate(self._classes):
                 tail_probs = [
                     GaussianNaiveBayes._gaussian_tail_probability(
                         x_obs=sample[k],
                         mean=self._model.theta_[j, k],
-                        var=self._model.var_[j, k]
-                    ) for k in range(X_ready.shape[1])
+                        var=self._model.var_[j, k],
+                    )
+                    for k in range(X_ready.shape[1])
                 ]  # for each feature.
-                if self._prob_mode == 'multiplied':
+                if self._prob_mode == "multiplied":
                     tail_probabilities[i, j] = _np.prod(
                         tail_probs
                     )  # Assuming independence across features
                 else:  # average
-                    tail_probabilities[i, j] = _np.mean(
-                        tail_probs
-                    )
+                    tail_probabilities[i, j] = _np.mean(tail_probs)
         return tail_probabilities
 
     def predict(
@@ -511,12 +509,13 @@ class GaussianNaiveBayes(_LocalClassifier):
 
         return super().predict(X, genes)
 
+
 class QProximityClassifier(_LocalClassifier):
     """This classifier based on q-proximity confidence metric would predict
      probabilities for each class, as well as
      the negative-control class (the last class, but not necessary),
      if generated.
-    
+
     .fit(), .predict(), and .predict_proba() are specially built, but
      often the last two methods are not to be called manually.
 
@@ -538,46 +537,55 @@ class QProximityClassifier(_LocalClassifier):
     threshold_confidence : float, default=0.75
         Confidence according to which whether the classifier predicts a sample
         to be in a class.
-    
+
     normalize: bool, default=False
         Will process row normalization first.
         (Not in-place. Will not affect spot integration - it will sum up
         raw counts first, and then process normalization.)
-        
+
     log1p: bool, default=True
         Will process log(1+x) transform on gene count matrix.
         (Not in-place. Will not affect spot integration - it will sum up
         raw counts first, and then process normalization (if specified), and
         then log1p.)
-    
+
     on_PCs: bool, default=True
         Uses PCs (transform matrix generated from sn_adata, not zero-centered)
         instead of raw genes as the predictors.
-    
+
     n_PCs: int, default=10
         Number of PCs to use as predictors. Ignored if `on_PCs` is False.
+
+    standardize_PCs: bool, default=True
+        Standardizes the PCs to make scales of different dimensions of PCs
+        consistent. It is for the proximity balls to work better. ignored
+        if `on_PCs` is False.
 
     q: float, default=0.85
         quantile (q), the proportion of points contained by the proximity ball.
         0 < q < 1.
-    
+
     capped: bool, default=True
         To avoid potential cases where prox_q > 1, we can use
         capped prox_q(x,i) :=
         min(1, prox_q(x,i)) as the confidence metric.
     """
 
-    def __init__(self, threshold_confidence: float = 0.75,
-                 log1p: bool = True,
-                 normalize: bool = False,
-                 on_PCs: bool = True,
-                 n_PCs: int = 10,
-                 q: float = 0.85,
-                 capped: bool = True,
-                 **kwargs):
+    def __init__(
+        self,
+        threshold_confidence: float = 0.75,
+        log1p: bool = True,
+        normalize: bool = False,
+        on_PCs: bool = True,
+        n_PCs: int = 10,
+        standardize_PCs: bool = True,
+        q: float = 0.85,
+        capped: bool = True,
+        **kwargs,
+    ):
         super().__init__(threshold_confidence=threshold_confidence)
         # The ._model_points is a dict mapping class_id to processed sample
-        # matrix of that class. 
+        # matrix of that class.
         self._model_points: dict[(int, _np.ndarray)] = dict()
         # The ._model_radii is a dict mapping class_id to radius of proximity
         # ball of that class.
@@ -591,16 +599,16 @@ class QProximityClassifier(_LocalClassifier):
         self._PC_loadings: _np.ndarray | _Undefined = _UNDEFINED
         self._n_PCs: int = n_PCs if on_PCs else 0
         self._on_PCs: bool = on_PCs
-        self._q: float = q
+        self._standardize_PCs: bool = standardize_PCs and on_PCs
         
+        # Saves singular values of SVD transform for standardizing PCs.
+        self._singular_values: _np.ndarray[float] | _Undefined = _UNDEFINED
+        self._q: float = q
+
         self._capped: bool = capped
         return None
-    
-    def fit(
-            self,
-            sn_adata: _AnnData,
-            colname_classes: str = 'cell_type'
-    ):
+
+    def fit(self, sn_adata: _AnnData, colname_classes: str = "cell_type"):
         """Trains the local classifier using the AnnData (h5ad) format
         snRNA-seq data.
 
@@ -621,50 +629,53 @@ class QProximityClassifier(_LocalClassifier):
             self (Model): a trained model (self).
         """
         X_y_ready: dict = super().fit(
-            sn_adata=sn_adata,
-            colname_classes=colname_classes
+            sn_adata=sn_adata, colname_classes=colname_classes
         )
-        X_ready: _np.ndarray = X_y_ready['X']
+        X_ready: _np.ndarray = X_y_ready["X"]
 
         if self._normalize:
-            X_ready = 1e4 * _np.divide(
-                X_ready,
-                _np.sum(X_ready, axis=1).reshape(-1,1)
-                )
+            X_ready = 1e4 * \
+                _np.divide(X_ready, _np.sum(X_ready, axis=1).reshape(-1, 1))
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
             # Non-centered PCA
+            svd_results = _np.linalg.svd(
+                a=X_ready, full_matrices=False, compute_uv=True, hermitian=False
+            )
             self._PC_loadings = _np.real(  # in case it is complex, but barely
-                _np.linalg.svd(a=X_ready,
-                        full_matrices=False,
-                        compute_uv=True,
-                        hermitian=False).Vh  # the loading matrix, PC by gene
-                        )[:self._n_PCs, :]
+                svd_results.Vh  # the loading matrix, PC by gene
+            )[: self._n_PCs, :]
+            self._singular_values = svd_results.S[: self._n_PCs]
+
             X_ready = X_ready @ self._PC_loadings.T
-        
+            if self._standardize_PCs:
+                X_ready = X_ready / self._singular_values
+
         # "Train" the model
         for i_cls, cls_name in enumerate(self.classes):
             # Save the points belonging to this class
-            self._model_points[i_cls] = X_ready[X_y_ready['y']==i_cls,:].copy()
+            self._model_points[i_cls] = X_ready[X_y_ready["y"]
+                                                == i_cls, :].copy()
             # Find centroid
             n_points: int = self._model_points[i_cls].shape[0]
             mean_vector = self._model_points[i_cls].sum(axis=0) / n_points
             # Calculate distances of points to mean vector
             distances_to_mean = _np.zeros(shape=(n_points,))
             for i_point, point in enumerate(self._model_points[i_cls]):
-                distances_to_mean[i_point] = _np.linalg.norm(point-mean_vector)
+                distances_to_mean[i_point] = _np.linalg.norm(
+                    point - mean_vector)
             # Points from near to far
             ix_from_near_to_far = _np.argsort(distances_to_mean)
             n_points_keep: int = int(_np.round(n_points * self._q))
             n_points_keep = max(n_points_keep, 1)
             self._model_n_points_keep[i_cls] = n_points_keep
             # Point at the ball boundary
-            i_support_point: int = ix_from_near_to_far[n_points_keep-1]
+            i_support_point: int = ix_from_near_to_far[n_points_keep - 1]
             radius_q: float = distances_to_mean[i_support_point]
             self._model_radii[i_cls] = radius_q
         return self
-    
+
     def predict_proba(
         self, X: _np.ndarray | _csr_matrix, genes: Iterable[str] | None = None
     ) -> _np.ndarray[float]:
@@ -682,44 +693,38 @@ class QProximityClassifier(_LocalClassifier):
              each row is a sample and each column is a class."""
         X_ready: _np.ndarray = super().predict_proba(X, genes)["X"]
         if self._normalize:
-            X_ready = 1e4 * _np.divide(
-                X_ready,
-                _np.sum(X_ready, axis=1).reshape(-1,1)
-                )
+            X_ready = 1e4 * \
+                _np.divide(X_ready, _np.sum(X_ready, axis=1).reshape(-1, 1))
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
             X_ready = X_ready @ self._PC_loadings.T
-        
-
+        if self._standardize_PCs:
+            X_ready = X_ready / self._singular_values
         # Probs
         probs = _np.zeros(shape=(X_ready.shape[0], len(self._classes)))
         for i_class, cls_name in enumerate(self._classes):
             # Compute distances of each sample to each ref points in the class
             dist_matrix = _np.zeros(
-                shape=(X_ready.shape[0],
-                       self._model_points[i_class].shape[0]
-                )
+                shape=(X_ready.shape[0], self._model_points[i_class].shape[0])
             )
             for i_sample, sample in enumerate(X_ready):
-                for i_refpoint, refpoint in enumerate(
-                    self._model_points[i_class]
-                ):
+                for i_refpoint, refpoint in enumerate(self._model_points[i_class]):
                     dist_matrix[i_sample, i_refpoint] = _np.linalg.norm(
                         sample - refpoint
                     )
                 # Count proximal points
                 n_proximal = _np.sum(
-                    dist_matrix[i_sample,:] <= self._model_radii[i_class]
+                    dist_matrix[i_sample, :] <= self._model_radii[i_class]
                 )
-                probs[i_sample, i_class] = n_proximal / self._model_n_points_keep[i_class]
+                probs[i_sample, i_class] = (
+                    n_proximal / self._model_n_points_keep[i_class]
+                )
                 if self._capped:
-                    probs[i_sample, i_class] = min(
-                        probs[i_sample, i_class], 1
-                    )
-        
+                    probs[i_sample, i_class] = min(probs[i_sample, i_class], 1)
+
         return probs
-    
+
     def predict(
         self, X: _np.ndarray | _csr_matrix, genes: Iterable[str] | None = None
     ) -> _np.ndarray[int]:
@@ -738,5 +743,3 @@ class QProximityClassifier(_LocalClassifier):
             _np.ndarray[int]: an array of predicted classIds."""
 
         return super().predict(X, genes)
-    
-                

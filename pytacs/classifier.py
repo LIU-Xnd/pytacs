@@ -1,4 +1,5 @@
-from sklearn.svm import SVC as _SVC
+from sklearn.svm import LinearSVC as _SVC
+from sklearn.calibration import CalibratedClassifierCV as _CalibratedClassifierCV
 
 from sklearn.naive_bayes import GaussianNB as _GaussianNB
 
@@ -208,16 +209,19 @@ class _LocalClassifier:
 
 
 class SVM(_LocalClassifier):
-    """Based on sklearn.svm.SVC (See relevant reference there),
+    """Based on sklearn.svm.linearSVC (See relevant reference there),
      specially built for snRNA-seq data training.
     This classifier would predict probabilities for each class, as well as
-     the negative-control class (the last class).
+     the negative-control class (the last class), if exists.
     An OVR (One-versus-Rest) strategy is used.
 
     .fit(), .predict(), and .predict_proba() are specially built, but
      often the last two methods are not to be called manually.
 
     Predicted integer i indicates the class self._classes[i].
+
+    Note: this is the same model as in K. Benjamin's TopACT (
+    https://gitlab.com/kfbenjamin/topact) classifier SVCClassifier.
 
     Args
     ----------
@@ -232,11 +236,8 @@ class SVM(_LocalClassifier):
         of scaling the regularization parameter C, see
         :ref:`sphx_glr_auto_examples_svm_plot_svm_scale_c.py`.
 
-    tol : float, default=1e-3
+    tol : float, default=1e-4
         Tolerance for stopping criterion.
-
-    cache_size : float, default=200
-        Specify the size of the kernel cache (in MB).
 
     random_state : int, RandomState instance or None, default=None
         Controls the pseudo random number generation for shuffling the data for
@@ -247,20 +248,28 @@ class SVM(_LocalClassifier):
     def __init__(
         self,
         threshold_confidence: float = 0.75,
+        log1p: bool = True,
+        normalize: bool = True,
+        on_PCs: bool = False,
+        n_PCs: int = 10,
         C: float = 1.0,
-        tol: float = 1e-3,
-        cache_size: float = 200,
+        tol: float = 1e-4,
         random_state: int | None = None,
         **kwargs,
     ):
-        self._model = _SVC(
+        _model = _SVC(
             C=C,
             tol=tol,
-            cache_size=cache_size,
             random_state=random_state,
-            probability=True,
+            dual=False,
             **kwargs,
         )
+        self._model = _CalibratedClassifierCV(_model)
+        self._normalize: bool = normalize
+        self._log1p: bool = log1p
+        self._PC_loadings: NDArray | _Undefined = _UNDEFINED
+        self._n_PCs: int = n_PCs if on_PCs else 0
+        self._on_PCs: bool = on_PCs
         return super().__init__(threshold_confidence=threshold_confidence)
 
     def fit(
@@ -289,8 +298,21 @@ class SVM(_LocalClassifier):
             sn_adata=sn_adata,
             colname_classes=colname_classes,
         )
-
-        self._model.fit(X=X_y_ready["X"], y=X_y_ready["y"])
+        X_ready: NDArray = X_y_ready["X"]
+        if self._normalize:
+            X_ready = 1e4 * \
+                _np.divide(X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8))
+        if self._log1p:
+            X_ready = _np.log1p(X_ready)
+        if self._on_PCs:
+            # Non-centered PCA
+            self._PC_loadings = _np.real(  # in case it is complex, but barely
+                _np.linalg.svd(
+                    a=X_ready, full_matrices=False, compute_uv=True, hermitian=False
+                ).Vh  # the loading matrix, PC by gene
+            )[: self._n_PCs, :]
+            X_ready = X_ready @ self._PC_loadings.T
+        self._model.fit(X=X_ready, y=X_y_ready["y"])
         return self
 
     def predict_proba(
@@ -311,8 +333,16 @@ class SVM(_LocalClassifier):
             2darray[float]: probs of falling into each class;
              each row is a sample and each column is a class."""
 
-        X_ready: dict = super().predict_proba(X, genes)
-        return self._model.predict_proba(X_ready["X"])
+        X_ready: NDArray = super().predict_proba(X, genes)['X']
+        if self._normalize:
+            X_ready = 1e4 * \
+                _np.divide(X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8))
+        if self._log1p:
+            X_ready = _np.log1p(X_ready)
+        if self._on_PCs:
+            assert isinstance(self._PC_loadings, _np.ndarray)
+            X_ready = X_ready @ self._PC_loadings.T
+        return self._model.predict_proba(X_ready)
 
     def predict(
         self,
@@ -436,7 +466,7 @@ class GaussianNaiveBayes(_LocalClassifier):
         X_ready: NDArray = X_y_ready["X"]
         if self._normalize:
             X_ready = 1e4 * \
-                _np.divide(X_ready, _np.sum(X_ready, axis=1).reshape(-1, 1))
+                _np.divide(X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8))
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
@@ -468,7 +498,7 @@ class GaussianNaiveBayes(_LocalClassifier):
         X_ready: NDArray = super().predict_proba(X, genes)["X"]
         if self._normalize:
             X_ready = 1e4 * \
-                _np.divide(X_ready, _np.sum(X_ready, axis=1).reshape(-1, 1))
+                _np.divide(X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8))
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
@@ -643,7 +673,7 @@ class QProximityClassifier(_LocalClassifier):
 
         if self._normalize:
             X_ready = 1e4 * \
-                _np.divide(X_ready, _np.sum(X_ready, axis=1).reshape(-1, 1))
+                _np.divide(X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8))
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
@@ -704,7 +734,7 @@ class QProximityClassifier(_LocalClassifier):
         X_ready: NDArray = super().predict_proba(X, genes)["X"]
         if self._normalize:
             X_ready = 1e4 * \
-                _np.divide(X_ready, _np.sum(X_ready, axis=1).reshape(-1, 1))
+                _np.divide(X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8))
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:

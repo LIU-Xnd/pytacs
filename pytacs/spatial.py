@@ -342,6 +342,9 @@ Coverage: {coverage*100:.2f}%
         for ix_new in self.sampleIds_new:
             sc_adata.obs.loc[str(
                 ix_new), "confidence"] = self.confidences_new[ix_new]
+        if 'cell_type' in sc_adata.obs.columns:
+            sc_adata.obs['cell_type_old'] = sc_adata.obs['cell_type'].copy()
+        sc_adata.obs['cell_type'] = list(self.classes_new.values())
         # Save cache
         if cache:
             self.cache_singleCellAnnData = sc_adata
@@ -376,5 +379,5 @@ Coverage: {coverage*100:.2f}%
         return sns.scatterplot(
             x=self.adata_spatial.obs["x"].values,
             y=self.adata_spatial.obs["y"].values,
-            hue=new_ids,
+            hue=new_ids.astype(_np.str_),
         )

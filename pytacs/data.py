@@ -4,7 +4,7 @@ import pandas as _pd
 import numpy as _np
 from scipy.sparse import csr_matrix as _csr_matrix
 from .utils import save_and_tidy_index as _save_and_tidy_index
-from .utils import _UNDEFINED
+from .utils import _UNDEFINED, _Undefined
 
 
 class AnnDataPreparer:
@@ -37,7 +37,7 @@ class AnnDataPreparer:
         sn_adata: _AnnData,
         sp_adata: _AnnData,
         sn_colname_celltype: str = "cell_type",
-        sp_colnames_x_and_y: tuple[str] = ("x", "y"),
+        sp_colnames_x_and_y: tuple[str, str] = ("x", "y"),
         overlapped_genes_warning: int = 10,
     ):
         """Prepare snRNA-seq and spatial transcriptomic data for pytacs.
@@ -93,16 +93,15 @@ class AnnDataPreparer:
                 ].copy()
                 del sp_adata_copy.obs[sp_name]
 
-        overlapped_genes = set(sp_adata_copy.var.index) & set(
-            sn_adata_copy.var.index)
+        overlapped_genes: list[str] = list(set(sp_adata_copy.var.index) & set(
+            sn_adata_copy.var.index))
         if len(overlapped_genes) <= overlapped_genes_warning:
             print(f"Warning: Overlapped genes of two datasets too few!")
 
-        overlapped_genes = list(overlapped_genes)
-        self.sn_adata = sn_adata_copy[:, overlapped_genes].copy()
-        self.sp_adata = sp_adata_copy
-        self.__sn_adata_withNegativeControl: _AnnData = _UNDEFINED
-        self.__normalized = False
+        self.sn_adata: _AnnData = sn_adata_copy[:, overlapped_genes].copy()
+        self.sp_adata: _AnnData = sp_adata_copy
+        self.__sn_adata_withNegativeControl: _AnnData | _Undefined = _UNDEFINED
+        self.__normalized: bool = False
         return None
 
     @property

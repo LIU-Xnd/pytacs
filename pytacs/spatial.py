@@ -1,11 +1,12 @@
 from scanpy import AnnData as _AnnData
 import numpy as _np
+from numpy.typing import NDArray
 from scipy.sparse import csr_matrix as _csr_matrix
 from scipy.spatial import distance_matrix as _distance_matrix
 from .classifier import _LocalClassifier
 from .utils import radial_basis_function as _rbf
 
-from .utils import _UNDEFINED
+from .utils import _UNDEFINED, _Undefined
 
 
 class SpatialHandler:
@@ -27,7 +28,7 @@ class SpatialHandler:
         self.max_spots_per_cell = max_spots_per_cell
         self.scale_rbf = scale_rbf
 
-        self.__filtrations = dict()
+        self.__filtrations: dict[int, list[int]] = dict()
         # dict {idx_centroid: [idx_centroid, idx_spot_level1, idx_spot_level2, ...]}
 
         self.__mask_newIds = _np.full(
@@ -35,14 +36,14 @@ class SpatialHandler:
         )
         # mask on each old sample. -1 for not assigned; otherwise the new id.
 
-        self.__classes_new = dict()
+        self.__classes_new: dict[int, int] = dict()
         # new id -> new class
 
-        self.__confidences_new = dict()
+        self.__confidences_new: dict[int, float] = dict()
         # new id -> confidence
 
-        self.cache_distance_matrix: _np.ndarray = _UNDEFINED
-        self.cache_singleCellAnnData: _AnnData = _UNDEFINED
+        self.cache_distance_matrix: NDArray[_np.float_] | _Undefined = _UNDEFINED
+        self.cache_singleCellAnnData: _AnnData | _Undefined= _UNDEFINED
         return None
 
     @property
@@ -61,20 +62,20 @@ class SpatialHandler:
         return copy_
 
     @property
-    def mask_newIds(self) -> _np.ndarray:
+    def mask_newIds(self) -> NDArray[_np.int_]:
         return self.__mask_newIds.copy()
 
     @property
-    def masked_spotIds(self) -> _np.ndarray:
+    def masked_spotIds(self) -> NDArray[_np.int_]:
         """Already positively masked spot ids."""
         return _np.where(self.mask_newIds > -1)[0]
 
     @property
-    def unmasked_spotIds(self) -> _np.ndarray:
+    def unmasked_spotIds(self) -> NDArray[_np.int_]:
         return _np.where(self.mask_newIds == -1)[0]
 
     @property
-    def sampleIds_new(self) -> _np.ndarray:
+    def sampleIds_new(self) -> NDArray[_np.int_]:
         return _np.sort(_np.array(list(set(list(_np.unique(self.mask_newIds))) - {-1})))
 
     @property
@@ -101,7 +102,7 @@ class SpatialHandler:
 --- --- --- --- --- ---
 """
 
-    def clear_cache(self):
+    def clear_cache(self) -> None:
         self.cache_distance_matrix = _UNDEFINED
         self.cache_singleCellAnnData = _UNDEFINED
         return None
@@ -111,15 +112,16 @@ class SpatialHandler:
         self.cache_distance_matrix = _distance_matrix(points, points)
         return None
 
-    def _find_adjacentOfOneSpot_spotIds(self, idx_this_spot: int) -> _np.ndarray:
+    def _find_adjacentOfOneSpot_spotIds(self, idx_this_spot: int) -> NDArray[_np.int_]:
         """Find all adjacent spots, including self."""
         if self.cache_distance_matrix is _UNDEFINED:
             self._compute_distance_matrix()
+        assert type(self.cache_distance_matrix) is _np.ndarray
         distances = self.cache_distance_matrix[idx_this_spot, :]
         idxs_adjacent = _np.where(distances <= self.threshold_adjacent)[0]
         return idxs_adjacent
 
-    def _find_adjacentOfManySpots_spotIds(self, filtration: list[int]) -> _np.ndarray:
+    def _find_adjacentOfManySpots_spotIds(self, filtration: list[int]) -> NDArray[_np.int_]:
         """Find all adjacent spots of a list of indices of spots (called filtration),
         excluding selves and already positively masked spots."""
         assert len(filtration) > 0
@@ -167,12 +169,12 @@ class SpatialHandler:
                 )
             return -1
         # Calculate the probs
-        probs = []
+        probs_: list[float] = []
         for idx in idxs_adjacent:
             loc_adj = self.adata_spatial.obs[["x", "y"]].values[idx, :]
-            probs.append(_rbf(loc_adj, loc_centroid, scale=self.scale_rbf))
-        probs = _np.array(probs)
-        probs /= _np.sum(probs)
+            probs_.append(_rbf(loc_adj, loc_centroid, scale=self.scale_rbf))
+        probs: NDArray[_np.float_] = _np.array(probs_)
+        probs /= _np.sum(probs_)
         # Select one randomly
         idx_selected = _np.random.choice(idxs_adjacent, p=probs)
         # Update the filtration
@@ -182,18 +184,18 @@ class SpatialHandler:
     def _aggregate_spots_given_filtration(
         self,
         filtration: list[int],
-    ) -> _np.ndarray:
+    ) -> NDArray:
         """Returns a 1d-array of counts of genes."""
         idxs_filtration = _np.array(filtration)
-        if type(self.adata_spatial.X) is _np.ndarray:
+        if type(self.adata_spatial.X) is NDArray:
             return self.adata_spatial.X[idxs_filtration, :].sum(axis=0)
         return self.adata_spatial.X.toarray()[idxs_filtration, :].sum(axis=0)
 
     def _compute_confidence_of_level(
         self,
         idx_centroid: int,
-        level: int = None,
-    ) -> _np.ndarray:
+        level: int | None = None,
+    ) -> NDArray[_np.float_]:
         """Calculate confidence of filtrations[idx_centroid][:level+1]"""
         self.__filtrations[idx_centroid] = self.__filtrations.get(
             idx_centroid, [idx_centroid]
@@ -227,12 +229,12 @@ class SpatialHandler:
          and returns the (confidence, class_id, new_sampleId).
          If reaches max_spots_per_cell and still not confident, returns the
          (confidence, -1, and idx_centroid)."""
-        label: int = _UNDEFINED
-        confidence: float = _UNDEFINED
+        label: int = -1
+        confidence: float = 0.
         for _ in range(self.max_spots_per_cell):
             probas = self._compute_confidence_of_level(
                 idx_centroid, level=None)
-            label = _np.argmax(probas)
+            label = int(_np.argmax(probas))
             confidence = probas[label]
             if confidence >= self.threshold_confidence:
                 self.__mask_newIds[_np.array(self.filtrations[idx_centroid])] = (
@@ -273,7 +275,7 @@ class SpatialHandler:
         """Segments the spots into single cells. Seed spots are selected randomly and sequentially.
         Updates self.sampleIds_new, self.confidences_new, self.classes_new."""
         confident_count = 0
-        class_count = dict()
+        class_count: dict[int, int] = dict()
         for i_iter in range(max_iter):
             if verbose and i_iter % 5 == 0:
                 print(f"Iteration {i_iter+1}:")
@@ -345,7 +347,7 @@ Coverage: {coverage*100:.2f}%
             self.cache_singleCellAnnData = sc_adata
         return sc_adata
 
-    def get_spatial_classes(self) -> _np.ndarray[int]:
+    def get_spatial_classes(self) -> NDArray[_np.int_]:
         """Get an array of integers, corresponding to class ids of each (old) sample."""
         res = _np.zeros(shape=(self.adata_spatial.shape[0],), dtype=int)
         for i_sample in range(len(res)):

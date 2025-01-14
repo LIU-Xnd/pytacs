@@ -1,10 +1,10 @@
 from sklearn.svm import SVC as _SVC
 
 from sklearn.naive_bayes import GaussianNB as _GaussianNB
-from sklearn.multioutput import MultiOutputClassifier as _MultiOutputClassifier
 
 from scanpy import AnnData as _AnnData
 import numpy as _np
+from numpy.typing import NDArray
 from scipy.stats import norm as _norm
 from scipy.sparse import csr_matrix as _csr_matrix
 from typing import Iterable, Literal
@@ -37,8 +37,8 @@ class _LocalClassifier:
     ):
         self._threshold_confidence: float = threshold_confidence
         self._has_negative_control: bool = False
-        self._genes: _np.ndarray[str] | _Undefined = _UNDEFINED
-        self._classes: _np.ndarray[str] | _Undefined = _UNDEFINED
+        self._genes: NDArray[_np.str_] | _Undefined = _UNDEFINED
+        self._classes: NDArray[_np.str_] | _Undefined = _UNDEFINED
         return None
 
     @property
@@ -54,27 +54,28 @@ class _LocalClassifier:
         return self._has_negative_control
 
     @property
-    def genes(self) -> _np.ndarray[str] | _Undefined:
+    def genes(self) -> NDArray[_np.str_] | _Undefined:
         return self._genes.copy()
 
     @property
-    def classes(self) -> _np.ndarray[str] | _Undefined:
+    def classes(self) -> NDArray[_np.str_] | _Undefined:
         return self._classes.copy()
 
     def classId_to_className(self, class_id: int) -> str:
         """Returns self._classes[class_id]."""
+        assert isinstance(self._classes, _np.ndarray)
         return self._classes[class_id]
 
     def className_to_classId(self, class_name: str) -> int:
         """Returns the index where `class_name` is in self._classes."""
         return _np.where(self._classes == class_name)[0][0]
 
-    def classIds_to_classNames(self, class_ids: Iterable[int]) -> _np.ndarray[str]:
+    def classIds_to_classNames(self, class_ids: Iterable[int]) -> NDArray[_np.str_]:
         return _np.array(
             list(map(lambda cid: self.classId_to_className(cid), class_ids))
         )
 
-    def classNames_to_classIds(self, class_names: Iterable[str]) -> _np.ndarray[int]:
+    def classNames_to_classIds(self, class_names: Iterable[str]) -> NDArray[_np.int_]:
         return _np.array(
             list(map(lambda cnm: self.className_to_classId(cnm), class_names))
         )
@@ -106,41 +107,41 @@ class _LocalClassifier:
         Return (overwritten):
             self (Model): a trained model (self).
         """
-        self._genes: _np.ndarray[str] = _np.array(sn_adata.var.index)
-        self._classes: _np.ndarray[str] = _np.array(
+        self._genes = _np.array(sn_adata.var.index)
+        self._classes = _np.array(
             (sn_adata.obs[colname_classes]).unique()
         ).astype(str)
         # Move the __NegativeControl label to the end
         if "__NegativeControl" in self._classes:
-            self._has_negative_control: bool = True
-            self._classes: _np.ndarray[str] = _np.concatenate(
+            self._has_negative_control = True
+            self._classes = _np.concatenate(
                 [
                     self._classes[self._classes != "__NegativeControl"],
                     _np.array(["__NegativeControl"]),
                 ]
             )
         else:
-            self._has_negative_control: bool = False
+            self._has_negative_control = False
         # Prepare y: convert classNames into classIds
-        class_ids: _np.ndarray[int] = self.classNames_to_classIds(
+        class_ids: NDArray[_np.int_] = self.classNames_to_classIds(
             _np.array(sn_adata.obs[colname_classes]).astype(str)
         )
-        X_train: _np.ndarray | _csr_matrix = sn_adata.X
+        X_train: NDArray[_np.float_ | _np.int_] | _csr_matrix = sn_adata.X
         if type(X_train) is _csr_matrix:
-            X_train: _np.ndarray[float | int] = X_train.toarray()
+            X_train = X_train.toarray()
 
         return dict(X=X_train, y=class_ids)
 
     def predict_proba(
         self,
-        X: _np.ndarray | _csr_matrix,
+        X: NDArray | _csr_matrix,
         genes: Iterable[str] | None = None,
     ) -> dict:
         """Predicts the probabilities for each
         sample to be of each class.
 
         Args:
-            X (_np.ndarray | _csr_matrix): input count matrix.
+            X (NDArray | _csr_matrix): input count matrix.
 
             genes (Iterable[str] | None): list of genes corresponding to
              X's columns. If None, set to pretrained snRNA-seq's gene list.
@@ -158,38 +159,43 @@ class _LocalClassifier:
             X = X.toarray()
         assert type(X) is _np.ndarray
         assert len(X.shape) == 2, "X must be a sample-by-gene matrix"
+        assert isinstance(self._genes, Iterable)
+        genes_: list[str] = []
         if genes is None:
-            genes = self._genes
+            genes_ = list(self._genes)
+        else:
+            assert isinstance(genes, Iterable)
+            genes_ = list(genes)
         assert len(
-            genes) == X.shape[1], "genes must be compatible with X.shape[1]"
+            genes_) == X.shape[1], "genes must be compatible with X.shape[1]"
         # Select those genes that appear in self._genes
-        X_new = _get_subCountMatrix(X, self._genes, genes)
+        X_new = _get_subCountMatrix(X, list(self._genes), genes_)
         # print(f"{X_new.shape=}")
         return {"X": X_new}
 
     def predict(
         self,
-        X: _np.ndarray,
+        X: NDArray,
         genes: Iterable[str] | None = None,
-    ) -> _np.ndarray[int]:
+    ) -> NDArray[_np.int_]:
         """Predicts classes of each sample. For example, if prediction is i,
          then the predicted class is self.classes[i].
          For those below confidence threshold,
          predicted classes are set to -1.
 
         Args:
-            X (_np.ndarray | _csr_matrix): input count matrix.
+            X (NDArray | _csr_matrix): input count matrix.
 
             genes (Iterable[str] | None): list of genes corresponding to
              those of X's columns. If None, set to pretrained gene list.
 
         Return:
-            _np.ndarray[int]: an array of predicted classIds.
+            NDArray[_np.int_]: an array of predicted classIds.
 
         Needs overwriting."""
 
-        probas: _np.ndarray = self.predict_proba(X, genes)
-        assert type(probas) is not dict, ".predict_proba() needs overwriting!"
+        probas: NDArray | dict[str, _np.ndarray] = self.predict_proba(X, genes)
+        assert isinstance(probas, _np.ndarray), ".predict_proba() needs overwriting!"
         # Not considering negative controls.
         classes_pred = _np.argmax(probas, axis=1)
         probas_max = probas[_np.arange(probas.shape[0]), classes_pred]
@@ -289,14 +295,14 @@ class SVM(_LocalClassifier):
 
     def predict_proba(
         self,
-        X: _np.ndarray,
+        X: NDArray,
         genes: Iterable[str] | None = None,
-    ) -> _np.ndarray[float]:
+    ) -> NDArray[_np.float_]:
         """Predicts the probabilities for each
          sample to be of each class.
 
         Args:
-            X (_np.ndarray | _csr_matrix): input count matrix.
+            X (NDArray | _csr_matrix): input count matrix.
 
             genes (Iterable[str] | None): list of genes corresponding to
              X's columns. If None, set to pretrained snRNA-seq's gene list.
@@ -310,22 +316,22 @@ class SVM(_LocalClassifier):
 
     def predict(
         self,
-        X: _np.ndarray,
+        X: NDArray,
         genes: Iterable[str] | None = None,
-    ) -> _np.ndarray[int]:
+    ) -> NDArray[_np.int_]:
         """Predicts classes of each sample. For example, if prediction is i,
          then the predicted class is self.classes[i].
          For those below confidence threshold,
          predicted classes are set to -1.
 
         Args:
-            X (_np.ndarray | _csr_matrix): input count matrix.
+            X (NDArray | _csr_matrix): input count matrix.
 
             genes (Iterable[str] | None): list of genes corresponding to
              those of X's columns. If None, set to pretrained gene list.
 
         Return:
-            _np.ndarray[int]: an array of predicted classIds."""
+            NDArray[_np.int_]: an array of predicted classIds."""
 
         return super().predict(X, genes)
 
@@ -391,13 +397,14 @@ class GaussianNaiveBayes(_LocalClassifier):
         self._model = _GaussianNB(**kwargs)
         self._normalize: bool = normalize
         self._log1p: bool = log1p
-        self._PC_loadings: _np.ndarray | _Undefined = _UNDEFINED
+        self._PC_loadings: NDArray | _Undefined = _UNDEFINED
         self._n_PCs: int = n_PCs if on_PCs else 0
         self._on_PCs: bool = on_PCs
         self._prob_mode: str = prob_mode
         assert prob_mode in ["relative", "multiplied", "average"]
         return None
 
+    @staticmethod
     def _gaussian_tail_probability(x_obs: float, mean: float, var: float) -> float:
         """Calculate the two-tail probability for
         each feature (assuming Gaussian distribution)"""
@@ -426,7 +433,7 @@ class GaussianNaiveBayes(_LocalClassifier):
         X_y_ready: dict = super().fit(
             sn_adata=sn_adata, colname_classes=colname_classes
         )
-        X_ready: _np.ndarray = X_y_ready["X"]
+        X_ready: NDArray = X_y_ready["X"]
         if self._normalize:
             X_ready = 1e4 * \
                 _np.divide(X_ready, _np.sum(X_ready, axis=1).reshape(-1, 1))
@@ -444,13 +451,13 @@ class GaussianNaiveBayes(_LocalClassifier):
         return self
 
     def predict_proba(
-        self, X: _np.ndarray | _csr_matrix, genes: Iterable[str] | None = None
-    ) -> _np.ndarray[float]:
+        self, X: NDArray | _csr_matrix, genes: Iterable[str] | None = None
+    ) -> NDArray[_np.float_]:
         """Predicts the probabilities for each
         sample to be of each class.
 
         Args:
-            X (_np.ndarray | _csr_matrix): input count matrix.
+            X (NDArray | _csr_matrix): input count matrix.
 
             genes (Iterable[str] | None): list of genes corresponding to
              X's columns. If None, set to pretrained snRNA-seq's gene list.
@@ -458,18 +465,19 @@ class GaussianNaiveBayes(_LocalClassifier):
         Return:
             2darray[float]: probs of falling into each class;
              each row is a sample and each column is a class."""
-        X_ready: _np.ndarray = super().predict_proba(X, genes)["X"]
+        X_ready: NDArray = super().predict_proba(X, genes)["X"]
         if self._normalize:
             X_ready = 1e4 * \
                 _np.divide(X_ready, _np.sum(X_ready, axis=1).reshape(-1, 1))
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
+            assert isinstance(self._PC_loadings, _np.ndarray)
             X_ready = X_ready @ self._PC_loadings.T
 
         if self._prob_mode == "relative":
             return self._model.predict_proba(X_ready)
-
+        assert isinstance(self._classes, _np.ndarray)
         tail_probabilities = _np.zeros(
             shape=(X_ready.shape[0], len(self._classes)))
         for i, sample in enumerate(X_ready):
@@ -491,21 +499,21 @@ class GaussianNaiveBayes(_LocalClassifier):
         return tail_probabilities
 
     def predict(
-        self, X: _np.ndarray | _csr_matrix, genes: Iterable[str] | None = None
-    ) -> _np.ndarray[int]:
+        self, X: NDArray | _csr_matrix, genes: Iterable[str] | None = None
+    ) -> NDArray[_np.int_]:
         """Predicts classes of each sample. For example, if prediction is i,
          then the predicted class is self.classes[i].
          For those below confidence threshold,
          predicted classes are set to -1.
 
         Args:
-            X (_np.ndarray | _csr_matrix): input count matrix.
+            X (NDArray | _csr_matrix): input count matrix.
 
             genes (Iterable[str] | None): list of genes corresponding to
              those of X's columns. If None, set to pretrained gene list.
 
         Return:
-            _np.ndarray[int]: an array of predicted classIds."""
+            NDArray[_np.int_]: an array of predicted classIds."""
 
         return super().predict(X, genes)
 
@@ -586,7 +594,7 @@ class QProximityClassifier(_LocalClassifier):
         super().__init__(threshold_confidence=threshold_confidence)
         # The ._model_points is a dict mapping class_id to processed sample
         # matrix of that class.
-        self._model_points: dict[(int, _np.ndarray)] = dict()
+        self._model_points: dict[(int, NDArray)] = dict()
         # The ._model_radii is a dict mapping class_id to radius of proximity
         # ball of that class.
         self._model_radii: dict[(int, float)] = dict()
@@ -596,13 +604,13 @@ class QProximityClassifier(_LocalClassifier):
 
         self._normalize: bool = normalize
         self._log1p: bool = log1p
-        self._PC_loadings: _np.ndarray | _Undefined = _UNDEFINED
+        self._PC_loadings: NDArray | _Undefined = _UNDEFINED
         self._n_PCs: int = n_PCs if on_PCs else 0
         self._on_PCs: bool = on_PCs
         self._standardize_PCs: bool = standardize_PCs and on_PCs
         
         # Saves singular values of SVD transform for standardizing PCs.
-        self._singular_values: _np.ndarray[float] | _Undefined = _UNDEFINED
+        self._singular_values: NDArray[_np.float_] | _Undefined = _UNDEFINED
         self._q: float = q
 
         self._capped: bool = capped
@@ -631,7 +639,7 @@ class QProximityClassifier(_LocalClassifier):
         X_y_ready: dict = super().fit(
             sn_adata=sn_adata, colname_classes=colname_classes
         )
-        X_ready: _np.ndarray = X_y_ready["X"]
+        X_ready: NDArray = X_y_ready["X"]
 
         if self._normalize:
             X_ready = 1e4 * \
@@ -653,6 +661,7 @@ class QProximityClassifier(_LocalClassifier):
                 X_ready = X_ready / self._singular_values
 
         # "Train" the model
+        assert type(self.classes) is _np.ndarray
         for i_cls, cls_name in enumerate(self.classes):
             # Save the points belonging to this class
             self._model_points[i_cls] = X_ready[X_y_ready["y"]
@@ -677,13 +686,13 @@ class QProximityClassifier(_LocalClassifier):
         return self
 
     def predict_proba(
-        self, X: _np.ndarray | _csr_matrix, genes: Iterable[str] | None = None
-    ) -> _np.ndarray[float]:
+        self, X: NDArray | _csr_matrix, genes: Iterable[str] | None = None
+    ) -> NDArray[_np.float_]:
         """Predicts the probabilities for each
         sample to be of each class.
 
         Args:
-            X (_np.ndarray | _csr_matrix): input count matrix.
+            X (NDArray | _csr_matrix): input count matrix.
 
             genes (Iterable[str] | None): list of genes corresponding to
              X's columns. If None, set to pretrained snRNA-seq's gene list.
@@ -691,17 +700,20 @@ class QProximityClassifier(_LocalClassifier):
         Return:
             2darray[float]: probs of falling into each class;
              each row is a sample and each column is a class."""
-        X_ready: _np.ndarray = super().predict_proba(X, genes)["X"]
+        
+        X_ready: NDArray = super().predict_proba(X, genes)["X"]
         if self._normalize:
             X_ready = 1e4 * \
                 _np.divide(X_ready, _np.sum(X_ready, axis=1).reshape(-1, 1))
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
+            assert type(self._PC_loadings) is _np.ndarray
             X_ready = X_ready @ self._PC_loadings.T
         if self._standardize_PCs:
             X_ready = X_ready / self._singular_values
         # Probs
+        assert type(self._classes) is _np.ndarray
         probs = _np.zeros(shape=(X_ready.shape[0], len(self._classes)))
         for i_class, cls_name in enumerate(self._classes):
             # Compute distances of each sample to each ref points in the class
@@ -726,20 +738,20 @@ class QProximityClassifier(_LocalClassifier):
         return probs
 
     def predict(
-        self, X: _np.ndarray | _csr_matrix, genes: Iterable[str] | None = None
-    ) -> _np.ndarray[int]:
+        self, X: NDArray | _csr_matrix, genes: Iterable[str] | None = None
+    ) -> NDArray[_np.int_]:
         """Predicts classes of each sample. For example, if prediction is i,
          then the predicted class is self.classes[i].
          For those below confidence threshold,
          predicted classes are set to -1.
 
         Args:
-            X (_np.ndarray | _csr_matrix): input count matrix.
+            X (NDArray | _csr_matrix): input count matrix.
 
             genes (Iterable[str] | None): list of genes corresponding to
              those of X's columns. If None, set to pretrained gene list.
 
         Return:
-            _np.ndarray[int]: an array of predicted classIds."""
+            NDArray[_np.int_]: an array of predicted classIds."""
 
         return super().predict(X, genes)

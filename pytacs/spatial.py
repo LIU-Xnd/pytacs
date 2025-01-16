@@ -11,16 +11,39 @@ from .utils import _UNDEFINED, _Undefined
 
 class SpatialHandler:
     """A spatial handler to produce filtrations, integrate spots into single cells,
-    and estimate their confidences."""
+    and estimate their confidences.
+
+    Args:
+        adata_spatial (AnnData): subcellular spatial transcriptomic 
+        AnnData, like Stereo-seq, with .obs[['x', 'y']] indicating
+        the locations of spots.
+
+        local_classifier (LocalClassifier): a trained local classifier
+        on reference scRNA data.
+
+        threshold_adjacent (float): spots within this distance are
+        considered adjacent. for integer-indexed spots, 1.2 for
+        4-neighbor adjacency and 1.5 for 8-neighbor adjacency.
+
+        max_spots_per_cell (int): max number of spots of a single
+        cell.
+
+        scale_rbf (float): next spot to add is selected from adjacent
+        spots, with a radial basis function probability, whose scale 
+        factor is this parameter."""
 
     def __init__(
         self,
         adata_spatial: _AnnData,
         local_classifier: _LocalClassifier,
-        threshold_adjacent: float = 1.5,
+        threshold_adjacent: float = 1.2,
         max_spots_per_cell: int = 81,
         scale_rbf: float = 1.0,
     ):
+        assert _np.all(
+            adata_spatial.obs.index.astype(_np.int_) ==\
+                _np.arange(adata_spatial.shape[0])
+        ), 'Spatial AnnData needs tidying using AnnDataPreparer!'
         self.adata_spatial = adata_spatial
         self.threshold_adjacent = threshold_adjacent
         self.local_classifier = local_classifier
@@ -28,22 +51,22 @@ class SpatialHandler:
         self.max_spots_per_cell = max_spots_per_cell
         self.scale_rbf = scale_rbf
 
-        self.__filtrations: dict[int, list[int]] = dict()
+        self._filtrations: dict[int, list[int]] = dict()
         # dict {idx_centroid: [idx_centroid, idx_spot_level1, idx_spot_level2, ...]}
 
-        self.__mask_newIds = _np.full(
+        self._mask_newIds = _np.full(
             (self.adata_spatial.X.shape[0],), fill_value=-1, dtype=int
         )
         # mask on each old sample. -1 for not assigned; otherwise the new id.
 
-        self.__classes_new: dict[int, int] = dict()
+        self._classes_new: dict[int, int] = dict()
         # new id -> new class
 
-        self.__confidences_new: dict[int, float] = dict()
+        self._confidences_new: dict[int, float] = dict()
         # new id -> confidence
 
         self.cache_distance_matrix: NDArray[_np.float_] | _Undefined = _UNDEFINED
-        self.cache_singleCellAnnData: _AnnData | _Undefined= _UNDEFINED
+        self.cache_singleCellAnnData: _AnnData | _Undefined = _UNDEFINED
         return None
 
     @property
@@ -57,13 +80,13 @@ class SpatialHandler:
     @property
     def filtrations(self) -> dict:
         copy_ = dict()
-        for k, v in self.__filtrations.items():
+        for k, v in self._filtrations.items():
             copy_[k] = v.copy()
         return copy_
 
     @property
     def mask_newIds(self) -> NDArray[_np.int_]:
-        return self.__mask_newIds.copy()
+        return self._mask_newIds.copy()
 
     @property
     def masked_spotIds(self) -> NDArray[_np.int_]:
@@ -80,11 +103,11 @@ class SpatialHandler:
 
     @property
     def classes_new(self) -> dict:
-        return self.__classes_new.copy()
+        return self._classes_new.copy()
 
     @property
     def confidences_new(self) -> dict:
-        return self.__confidences_new.copy()
+        return self._confidences_new.copy()
 
     def __repr__(self) -> str:
         return f"""--- Spatial Handler (pytacs) ---
@@ -147,10 +170,10 @@ class SpatialHandler:
          and returns the added spot index (-1 for not added)."""
         loc_centroid = self.adata_spatial.obs[[
             "x", "y"]].values[idx_centroid, :]
-        self.__filtrations[idx_centroid] = self.__filtrations.get(
+        self._filtrations[idx_centroid] = self._filtrations.get(
             idx_centroid, [idx_centroid]
         )
-        if len(self.__filtrations[idx_centroid]) >= self.max_spots_per_cell:
+        if len(self._filtrations[idx_centroid]) >= self.max_spots_per_cell:
             if verbose:
                 print(
                     f"Warning: reaches max_spots_per_cell {
@@ -159,7 +182,7 @@ class SpatialHandler:
             return -1
         # Find adjacent candidate spots
         idxs_adjacent = self._find_adjacentOfManySpots_spotIds(
-            self.__filtrations[idx_centroid]
+            self._filtrations[idx_centroid]
         )
         if len(idxs_adjacent) == 0:
             if verbose:
@@ -178,7 +201,7 @@ class SpatialHandler:
         # Select one randomly
         idx_selected = _np.random.choice(idxs_adjacent, p=probs)
         # Update the filtration
-        self.__filtrations[idx_centroid].append(idx_selected)
+        self._filtrations[idx_centroid].append(idx_selected)
         return idx_selected
 
     def _aggregate_spots_given_filtration(
@@ -197,7 +220,7 @@ class SpatialHandler:
         level: int | None = None,
     ) -> NDArray[_np.float_]:
         """Calculate confidence of filtrations[idx_centroid][:level+1]"""
-        self.__filtrations[idx_centroid] = self.__filtrations.get(
+        self._filtrations[idx_centroid] = self._filtrations.get(
             idx_centroid, [idx_centroid]
         )
         if level is None:
@@ -237,11 +260,11 @@ class SpatialHandler:
             label = int(_np.argmax(probas))
             confidence = probas[label]
             if confidence >= self.threshold_confidence:
-                self.__mask_newIds[_np.array(self.filtrations[idx_centroid])] = (
+                self._mask_newIds[_np.array(self.filtrations[idx_centroid])] = (
                     idx_centroid
                 )
-                self.__classes_new[idx_centroid] = label
-                self.__confidences_new[idx_centroid] = confidence
+                self._classes_new[idx_centroid] = label
+                self._confidences_new[idx_centroid] = confidence
                 break
             # Add n cells per step.
             for i_add in range(n_spots_add_per_step):
@@ -257,7 +280,7 @@ class SpatialHandler:
             label = -1
         if label == -1:
             # Clear filtrations that are not confident
-            del self.__filtrations[idx_centroid]
+            del self._filtrations[idx_centroid]
         return (confidence, label, idx_centroid)
 
     # Need to be careful with input idx_centroid - you don't want to
@@ -381,3 +404,150 @@ Coverage: {coverage*100:.2f}%
             y=self.adata_spatial.obs["y"].values,
             hue=new_ids.astype(_np.str_),
         )
+
+
+class SpatialHandlerAutopilot(SpatialHandler):
+    """A spatial handler to produce filtrations
+    self-guidedly (autopilot), integrate spots into single cells,
+    and estimate their confidences.
+
+    Args:
+        adata_spatial (AnnData): subcellular spatial transcriptomic 
+        AnnData, like Stereo-seq, with .obs[['x', 'y']] indicating
+        the locations of spots.
+
+        local_classifier (LocalClassifier): a trained local classifier
+        on reference scRNA data.
+
+        threshold_adjacent (float): spots within this distance are
+        considered adjacent. for integer-indexed spots, 1.2 for
+        4-neighbor adjacency and 1.5 for 8-neighbor adjacency.
+
+        max_spots_per_cell (int): max number of spots of a single
+        cell.
+
+        scale_rbf (float): next spot to add is selected from adjacent
+        spots, with a radial basis function probability, whose scale 
+        factor is this parameter.
+
+        n_spots_per_unit (int): the number of spots an inference unit
+        has. This unit is a small group of cells assumed to be of the
+        same type. An inference probability is calculated based on
+        this unit of spots for self-guided filtration building.
+
+        multiplier_sameClass (float): the prob of next-to-add spot
+        is multiplied by this factor if it is of the same class as the
+        center spot (and the probs of all next-spots are re-normalized).
+        Expected to be no less than 1. Defaults to 1."""
+
+    def __init__(self,
+                 adata_spatial: _AnnData,
+                 local_classifier: _LocalClassifier,
+                 threshold_adjacent: float = 1.2,
+                 max_spots_per_cell: int = 81,
+                 scale_rbf: float = 1.0,
+                 n_spots_per_unit: int = 3,
+                 multiplier_sameClass: float = 1.,
+                 ) -> None:
+        
+        assert n_spots_per_unit >= 1
+        assert multiplier_sameClass >= 1.
+        super().__init__(
+            adata_spatial=adata_spatial,
+            local_classifier=local_classifier,
+            threshold_adjacent=threshold_adjacent,
+            max_spots_per_cell=max_spots_per_cell,
+            scale_rbf=scale_rbf,
+        )
+        self.n_spots_per_unit: int = n_spots_per_unit
+        self.multiplier_sameClass: int = multiplier_sameClass
+        return None
+
+    def __repr__(self) -> str:
+        return f"""--- Spatial Handler Autopilot (pytacs) ---
+- adata_spatial: {self.adata_spatial}
+- threshold_adjacent: {self.threshold_adjacent}
+- local_classifier: {self.local_classifier}
+    + threshold_confidence: {self.threshold_confidence}
+    + has_negative_control: {self.has_negative_control}
+- max_spots_per_cell: {self.max_spots_per_cell}
+- scale_rbf: {self.scale_rbf}
+- n_spots_per_unit: {self.n_spots_per_unit}
+- multiplier_sameClass: {self.multiplier_sameClass}
+- filtrations: {len(self.filtrations)} fitted
+- single-cell segmentation:
+    + new samples: {len(self.sampleIds_new)}
+    + AnnData: {self.cache_singleCellAnnData}
+--- --- --- --- --- ---
+"""
+
+    def _firstRound_preMapping(self) -> None:
+        """Updates self.adata_spatial.obs['cell_type_premapping1']
+        and .obsm['confidence_premapping1'].
+
+        After the first round mapping, each spot has a confidence.
+        But some (or many) spots have rather low confidences due
+        to sparsity. They would almost always be left the last ones
+        to be added to filtrations preferably by the filtration
+        builder when adding next-spots to it, potentially causing
+        bias. This could be addressed by performing a second-round
+        pre-mapping."""
+
+        # >>> Temporarily change the confidence threshold
+        threshold_confidence_old: float = self.threshold_confidence
+        self.local_classifier.set_threshold_confidence(0.)
+        confidence_premapping: NDArray[_np.float_] = self\
+            .local_classifier\
+                .predict_proba(
+                    X=self.adata_spatial.X,
+                    genes=self.adata_spatial.var.index
+        )
+        if self.has_negative_control:
+            confidence_premapping = confidence_premapping[:,:-1]
+            # only preserves real classes (ids).
+        self.adata_spatial.obsm['confidence_premapping1'] =\
+            confidence_premapping
+        self.adata_spatial.obs['cell_type_premapping1'] =\
+            _np.argmax(
+                a=confidence_premapping,
+                axis=1
+            ).astype(_np.int_)
+
+        # <<< Reset the confidence threshold
+        self.local_classifier.set_threshold_confidence(
+            value=threshold_confidence_old
+        )
+        return None
+    
+    def _secondRound_preMapping(self) -> None:
+        """Updates self.adata_spatial.obs['cell_type_premapping2']
+        and .obsm['confidence_premapping2'].
+
+        After the first round mapping, each spot has a confidence.
+        But some (or many) spots have rather low confidences due
+        to sparsity. They would almost always be left the last ones
+        to be added to filtrations preferably by the filtration
+        builder when adding next-spots to it, potentially causing
+        bias. This could be addressed by performing a second-round
+        pre-mapping."""
+
+        self.adata_spatial.obsm['confidence_premapping2'] =\
+            _np.zeros(
+                shape=self\
+                        .adata_spatial\
+                            .obsm['confidence_premapping1']\
+                                .shape
+            )
+        
+        for i_spot in range(self.adata_spatial.shape[0]):
+            # Get adjacent neighbors
+            ixs_adj: NDArray[_np.int_] =\
+                super()._find_adjacentOfOneSpot_spotIds(i_spot)
+            # Extract confidences
+            # Extract class
+            # Extract class confidences
+            # Apply multiplier
+            # Normalize probs
+            # Sample another self.n_spots_per_unit-1 spots at probs
+            # Compute confidences of the aggregated spots (unit)
+

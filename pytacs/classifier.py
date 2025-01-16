@@ -108,6 +108,10 @@ class _LocalClassifier:
         Return (overwritten):
             self (Model): a trained model (self).
         """
+        assert _np.all(
+            sn_adata.obs.index.astype(_np.int_) ==\
+                _np.arange(sn_adata.shape[0])
+        ), 'sn_adata needs tidying using AnnDataPreparer!'
         self._genes = _np.array(sn_adata.var.index)
         self._classes = _np.array(
             (sn_adata.obs[colname_classes]).unique()
@@ -183,6 +187,8 @@ class _LocalClassifier:
          then the predicted class is self.classes[i].
          For those below confidence threshold,
          predicted classes are set to -1.
+        You can set .threshold_confidence by
+        .set_threshold_confidence().
 
         Args:
             X (NDArray | _csr_matrix): input count matrix.

@@ -1,0 +1,139 @@
+numpy 1.26.4 Fundamental package for array computing in Python
+pandas 2.2.3 Powerful data structures for data analysis, time series, and statistics
+├── numpy >=1.26.0
+├── python-dateutil >=2.8.2
+│   └── six >=1.5 
+├── pytz >=2020.1
+└── tzdata >=2022.7
+scanpy 1.10.4 Single-Cell Analysis in Python.
+├── anndata >=0.8
+│   ├── array-api-compat >1.4,<1.5 || >1.5 
+│   ├── h5py >=3.7 
+│   │   └── numpy >=1.19.3 
+│   ├── natsort * 
+│   ├── numpy >=1.23 (circular dependency aborted here)
+│   ├── packaging >=20.0 
+│   ├── pandas >=1.4,<2.1.0rc0 || >2.1.0rc0,<2.1.2 || >2.1.2 
+│   │   ├── numpy >=1.26.0 (circular dependency aborted here)
+│   │   ├── python-dateutil >=2.8.2 
+│   │   │   └── six >=1.5 
+│   │   ├── pytz >=2020.1 
+│   │   └── tzdata >=2022.7 
+│   └── scipy >1.8 
+│       └── numpy >=1.23.5,<2.5 (circular dependency aborted here)
+├── h5py >=3.6
+│   └── numpy >=1.19.3 
+├── joblib *
+├── legacy-api-wrap >=1.4
+├── matplotlib >=3.6
+│   ├── contourpy >=1.0.1 
+│   │   └── numpy >=1.23 
+│   ├── cycler >=0.10 
+│   ├── fonttools >=4.22.0 
+│   ├── kiwisolver >=1.3.1 
+│   ├── numpy >=1.23 (circular dependency aborted here)
+│   ├── packaging >=20.0 
+│   ├── pillow >=8 
+│   ├── pyparsing >=2.3.1 
+│   └── python-dateutil >=2.7 
+│       └── six >=1.5 
+├── natsort *
+├── networkx >=2.7
+├── numba >=0.56
+│   ├── llvmlite ==0.44.* 
+│   └── numpy >=1.24,<2.2 
+├── numpy >=1.23
+├── packaging >=21.3
+├── pandas >=1.5
+│   ├── numpy >=1.26.0 
+│   ├── python-dateutil >=2.8.2 
+│   │   └── six >=1.5 
+│   ├── pytz >=2020.1 
+│   └── tzdata >=2022.7 
+├── patsy !=1.0.0
+│   └── numpy >=1.4 
+├── pynndescent >=0.5
+│   ├── joblib >=0.11 
+│   ├── llvmlite >=0.30 
+│   ├── numba >=0.51.2 
+│   │   ├── llvmlite ==0.44.* (circular dependency aborted here)
+│   │   └── numpy >=1.24,<2.2 
+│   ├── scikit-learn >=0.18 
+│   │   ├── joblib >=1.2.0 (circular dependency aborted here)
+│   │   ├── numpy >=1.19.5 (circular dependency aborted here)
+│   │   ├── scipy >=1.6.0 
+│   │   │   └── numpy >=1.23.5,<2.5 (circular dependency aborted here)
+│   │   └── threadpoolctl >=3.1.0 
+│   └── scipy >=1.0 (circular dependency aborted here)
+├── scikit-learn >=1.1
+│   ├── joblib >=1.2.0 
+│   ├── numpy >=1.19.5 
+│   ├── scipy >=1.6.0 
+│   │   └── numpy >=1.23.5,<2.5 (circular dependency aborted here)
+│   └── threadpoolctl >=3.1.0 
+├── scipy >=1.8
+│   └── numpy >=1.23.5,<2.5 
+├── seaborn >=0.13
+│   ├── matplotlib >=3.4,<3.6.1 || >3.6.1 
+│   │   ├── contourpy >=1.0.1 
+│   │   │   └── numpy >=1.23 
+│   │   ├── cycler >=0.10 
+│   │   ├── fonttools >=4.22.0 
+│   │   ├── kiwisolver >=1.3.1 
+│   │   ├── numpy >=1.23 (circular dependency aborted here)
+│   │   ├── packaging >=20.0 
+│   │   ├── pillow >=8 
+│   │   ├── pyparsing >=2.3.1 
+│   │   └── python-dateutil >=2.7 
+│   │       └── six >=1.5 
+│   ├── numpy >=1.20,<1.24.0 || >1.24.0 (circular dependency aborted here)
+│   └── pandas >=1.2 
+│       ├── numpy >=1.26.0 (circular dependency aborted here)
+│       ├── python-dateutil >=2.8.2 (circular dependency aborted here)
+│       ├── pytz >=2020.1 
+│       └── tzdata >=2022.7 
+├── session-info *
+│   └── stdlib-list * 
+├── statsmodels >=0.13
+│   ├── numpy >=1.22.3,<3 
+│   ├── packaging >=21.3 
+│   ├── pandas >=1.4,<2.1.0 || >2.1.0 
+│   │   ├── numpy >=1.26.0 (circular dependency aborted here)
+│   │   ├── python-dateutil >=2.8.2 
+│   │   │   └── six >=1.5 
+│   │   ├── pytz >=2020.1 
+│   │   └── tzdata >=2022.7 
+│   ├── patsy >=0.5.6 
+│   │   └── numpy >=1.4 (circular dependency aborted here)
+│   └── scipy >=1.8,<1.9.2 || >1.9.2 
+│       └── numpy >=1.23.5,<2.5 (circular dependency aborted here)
+├── tqdm *
+│   └── colorama * 
+└── umap-learn >0.5.0
+    ├── numba >=0.51.2 
+    │   ├── llvmlite ==0.44.* 
+    │   └── numpy >=1.24,<2.2 
+    ├── numpy >=1.17 (circular dependency aborted here)
+    ├── pynndescent >=0.5 
+    │   ├── joblib >=0.11 
+    │   ├── llvmlite >=0.30 (circular dependency aborted here)
+    │   ├── numba >=0.51.2 (circular dependency aborted here)
+    │   ├── scikit-learn >=0.18 
+    │   │   ├── joblib >=1.2.0 (circular dependency aborted here)
+    │   │   ├── numpy >=1.19.5 (circular dependency aborted here)
+    │   │   ├── scipy >=1.6.0 
+    │   │   │   └── numpy >=1.23.5,<2.5 (circular dependency aborted here)
+    │   │   └── threadpoolctl >=3.1.0 
+    │   └── scipy >=1.0 (circular dependency aborted here)
+    ├── scikit-learn >=0.22 (circular dependency aborted here)
+    ├── scipy >=1.3.1 (circular dependency aborted here)
+    └── tqdm * 
+        └── colorama * 
+scikit-learn 1.6.1 A set of python modules for machine learning and data mining
+├── joblib >=1.2.0
+├── numpy >=1.19.5
+├── scipy >=1.6.0
+│   └── numpy >=1.23.5,<2.5 
+└── threadpoolctl >=3.1.0
+scipy 1.15.1 Fundamental algorithms for scientific computing in Python
+└── numpy >=1.23.5,<2.5

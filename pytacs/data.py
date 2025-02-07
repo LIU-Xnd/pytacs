@@ -81,7 +81,11 @@ class AnnDataPreparer:
             sn_adata_copy.obs["cell_type"] = sn_adata_copy.obs[
                 sn_colname_celltype
             ].copy()
-            del sn_adata_copy[sn_colname_celltype]
+            del sn_adata_copy.obs[sn_colname_celltype]
+            if (sn_colname_celltype + '_colors') in sn_adata_copy.uns.keys():
+                sn_adata_copy.uns['cell_type_colors'] = sn_adata_copy\
+                    .uns[sn_colname_celltype + '_colors']\
+                        .copy()
 
         assert len(sp_colnames_x_and_y) == 2
         sp_names_standard = ("x", "y")

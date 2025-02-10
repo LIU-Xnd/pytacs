@@ -45,7 +45,7 @@
 #  needs addressing in the future.
 # - Write __repr__ for _LocalClassifier and its child classes.
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 from .data import AnnDataPreparer
 from .classifier import SVM, GaussianNaiveBayes, QProximityClassifier

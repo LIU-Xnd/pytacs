@@ -98,12 +98,11 @@ def save_and_tidy_index(
     """Save old index as a col of obs and re-index with integers (string type) (only apply
      for .obs).
     Inplace operation."""
-    if colname_to_save_oldIndex in adata.obs_keys():
+    while colname_to_save_oldIndex in adata.obs_keys():
         print(
-            f"Warning: {
-                colname_to_save_oldIndex} already in obs! No operation processed."
+            f"Warning: {colname_to_save_oldIndex} already in obs! New name: {colname_to_save_oldIndex}_copy."
         )
-        return None
+        colname_to_save_oldIndex += '_copy'
     adata.obs[colname_to_save_oldIndex] = adata.obs.index
     adata.obs.index = _np.arange(adata.obs.shape[0]).astype(str)
     return None

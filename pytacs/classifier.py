@@ -113,9 +113,9 @@ class _LocalClassifier:
                 _np.arange(sn_adata.shape[0])
         ), 'sn_adata needs tidying using AnnDataPreparer!'
         self._genes = _np.array(sn_adata.var.index)
-        self._classes = _np.array(
+        self._classes = _np.sort(_np.array(
             (sn_adata.obs[colname_classes]).unique()
-        ).astype(str)
+        ).astype(str))  # sorted alphabetically
         # Move the __NegativeControl label to the end
         if "__NegativeControl" in self._classes:
             self._has_negative_control = True

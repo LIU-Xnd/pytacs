@@ -1,6 +1,6 @@
 [project]
 name = "pytacs"
-version = "1.1.0"
+version = "1.1.2"
 description = "Pytacs: Python-implemented Topological Automatic Cell Segmentation"
 authors = [
     {name = "LIU-Xnd",email = "lqxnds@foxmail.com"}

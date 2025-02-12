@@ -190,11 +190,7 @@ class _SpatialHandlerBase:
         return _np.array(
             list(
                 (set(adj_spots) - set(filtration))
-                - (
-                    set(list(self.masked_spotIds))
-                    if not self.allow_cell_overlap
-                    else set()
-                )
+                - (set(self.masked_spotIds) if not self.allow_cell_overlap else set())
             )
         )
 
@@ -715,6 +711,10 @@ class SpatialHandler(_SpatialHandlerBase):
         label: int = -1  # cell type assigned, -1 for not confident
         confidence: float = 0.0
         n_features_old: int = 0
+        # Collect filtrations
+        self._filtrations[idx_centroid] = self._filtrations.get(
+            idx_centroid, [idx_centroid]
+        )
         self.cache_n_features[idx_centroid] = self.cache_n_features.get(
             idx_centroid,
             [int((self.cache_aggregated_counts[idx_centroid] > 0).sum())],
@@ -952,6 +952,14 @@ class SpatialHandlerParallel(SpatialHandler):
             shape=len(idx_centroids),
             dtype=int,
         )
+        # Collect filtrations
+        for idx in idx_centroids:
+            self._filtrations[idx] = self._filtrations.get(idx, [idx])
+        for i_idx, idx in enumerate(idx_centroids):
+            self.cache_aggregated_counts[idx] = self.cache_aggregated_counts.get(
+                idx,
+                _to_array(self.adata_spatial.X[[idx], :])[0, :],
+            )
         for idx in idx_centroids:
             self.cache_n_features[idx] = self.cache_n_features.get(
                 idx,
@@ -998,8 +1006,8 @@ class SpatialHandlerParallel(SpatialHandler):
             labels[confidences < self.threshold_confidence] = -1
         # Clear unconfident caches
         for i_idx, label in enumerate(labels):
+            idx = idx_centroids[i_idx]
             if label == -1:
-                idx = idx_centroids[i_idx]
                 del self._filtrations[idx]
                 del self.cache_n_features[idx]
             # Clear aggregated counts cache once their confidences are determined,

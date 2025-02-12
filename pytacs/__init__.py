@@ -49,4 +49,4 @@ __version__ = "1.1.2"
 
 from .data import AnnDataPreparer
 from .classifier import SVM, GaussianNaiveBayes, QProximityClassifier
-from .spatial import SpatialHandler, SpatialHandlerAutopilot
+from .spatial import SpatialHandler

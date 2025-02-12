@@ -9,7 +9,7 @@ from .utils import to_array as _to_array
 from .utils import _UNDEFINED, _Undefined
 
 
-class _SpatialHandlerBase:
+class SpatialHandler:
     """A spatial handler to produce filtrations, integrate spots into single cells,
     and estimate their confidences.
 
@@ -459,7 +459,7 @@ Coverage: {coverage*100:.2f}%
         )
 
 
-class SpatialHandler(_SpatialHandlerBase):
+class SpatialHandlerAutopilot(SpatialHandler):
     """A spatial handler to produce filtrations
     self-guidedly (autopilot), integrate spots into single cells,
     and estimate their confidences.
@@ -480,18 +480,15 @@ class SpatialHandler(_SpatialHandlerBase):
         cell.
 
         scale_rbf (float): next spot to add is selected from adjacent
-        spots, with a coefficient of radial basis function probability,
-        whose scale factor is this parameter.
+        spots, with a radial basis function probability, whose scale
+        factor is this parameter.
 
         threshold_delta_n_features (int): after reaching threshold_confidence,
         the process of building a filtration (adding spots to it) would not
         stop until the stepwise change in n_features is less than
         `threshold_delta_n_features`.
 
-        allow_cell_overlap (bool): allows cells to share some of the
-        spots. The cell-type of a spot is defined as the type it was
-        last assigned to.
-        """
+       """
 
     def __init__(
         self,
@@ -501,7 +498,6 @@ class SpatialHandler(_SpatialHandlerBase):
         max_spots_per_cell: int = 81,
         scale_rbf: float = 1.0,
         threshold_delta_n_features: int = 10,
-        allow_cell_overlap: bool = True,
     ) -> None:
         super().__init__(
             adata_spatial=adata_spatial,
@@ -509,7 +505,6 @@ class SpatialHandler(_SpatialHandlerBase):
             threshold_adjacent=threshold_adjacent,
             max_spots_per_cell=max_spots_per_cell,
             scale_rbf=scale_rbf,
-            allow_cell_overlap=allow_cell_overlap,
         )
         self.threshold_delta_n_features: int = threshold_delta_n_features
         self.cache_n_features: dict[int, list[int]] = dict()

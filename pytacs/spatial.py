@@ -7,6 +7,7 @@ from .classifier import _LocalClassifier
 from .utils import radial_basis_function as _rbf
 from .utils import to_array as _to_array
 from .utils import _UNDEFINED, _Undefined
+from tqdm import tqdm
 
 
 class _SpatialHandlerBase:
@@ -31,7 +32,7 @@ class _SpatialHandlerBase:
         scale_rbf (float): next spot to add is selected from adjacent
         spots, with a radial basis function probability, whose scale
         factor is this parameter.
-        
+
         allow_cell_overlap (bool): allows cells to share some of the
         spots. The cell-type of a spot is defined as the type it was
         last assigned to."""
@@ -188,8 +189,10 @@ class _SpatialHandlerBase:
             adj_spots += list(self._find_adjacentOfOneSpot_spotIds(spot))
         return _np.array(
             list(
-                (set(adj_spots) - set(filtration)) - (
-                    set(list(self.masked_spotIds)) if not self.allow_cell_overlap
+                (set(adj_spots) - set(filtration))
+                - (
+                    set(list(self.masked_spotIds))
+                    if not self.allow_cell_overlap
                     else set()
                 )
             )
@@ -207,8 +210,7 @@ class _SpatialHandlerBase:
 
         Update the self.filtrations, self.cache_aggregated_counts,
          and returns the added spot index (-1 for not added)."""
-        loc_centroid = self.adata_spatial.obs[[
-            "x", "y"]].values[idx_centroid, :]
+        loc_centroid = self.adata_spatial.obs[["x", "y"]].values[idx_centroid, :]
         self._filtrations[idx_centroid] = self._filtrations.get(
             idx_centroid, [idx_centroid]
         )
@@ -243,10 +245,11 @@ class _SpatialHandlerBase:
         self._filtrations[idx_centroid].append(idx_selected)
         # Update the aggregated counts cache
         self.cache_aggregated_counts[idx_centroid] = self.cache_aggregated_counts.get(
-            idx_centroid, _to_array(self.adata_spatial.X[[idx_centroid], :])[0,:]
+            idx_centroid, _to_array(self.adata_spatial.X[[idx_centroid], :])[0, :]
         )
         self.cache_aggregated_counts[idx_centroid] += _to_array(
-            self.adata_spatial.X[[idx_selected], :])[0,:]
+            self.adata_spatial.X[[idx_selected], :]
+        )[0, :]
 
         return idx_selected
 
@@ -258,11 +261,11 @@ class _SpatialHandlerBase:
         Load from cache.
         """
         self.cache_aggregated_counts[idx_centroid] = self.cache_aggregated_counts.get(
-            idx_centroid, _to_array(self.adata_spatial.X[[idx_centroid], :])[0,:]
+            idx_centroid, _to_array(self.adata_spatial.X[[idx_centroid], :])[0, :]
         )
         return self.cache_aggregated_counts[idx_centroid]
 
-    def _compute_confidence_of_level(
+    def _compute_confidence_of_filtration(
         self,
         idx_centroid: int,
     ) -> NDArray[_np.float_]:
@@ -298,7 +301,7 @@ class _SpatialHandlerBase:
         label: int = -1
         confidence: float = 0.0
         for _ in range(self.max_spots_per_cell):
-            probas = self._compute_confidence_of_level(idx_centroid)
+            probas = self._compute_confidence_of_filtration(idx_centroid)
             label = int(_np.argmax(probas))
             confidence = probas[label]
             if confidence >= self.threshold_confidence:
@@ -343,7 +346,7 @@ class _SpatialHandlerBase:
         warnings: bool = False,
         print_summary: bool = True,
     ):
-        """Segments the spots into single cells. Seed spots are selected randomly and sequentially.
+        """Segments the spots into single cells. Spots to query are selected randomly and sequentially.
         Updates self.sampleIds_new, self.confidences_new, self.classes_new."""
         confident_count = 0
         class_count: dict[int, int] = dict()
@@ -353,7 +356,7 @@ class _SpatialHandlerBase:
             available_spots = self.unmasked_spotIds
             if len(available_spots) == 0:
                 print("All spots queried. Done.")
-                return
+                break
             ix_centroid = _np.random.choice(available_spots)
             if verbose and i_iter % 5 == 0:
                 print(f"Querying spot {ix_centroid} ...")
@@ -382,12 +385,14 @@ class _SpatialHandlerBase:
         if verbose:
             print("Done.")
         if print_summary:
-            print(f"""--- Summary ---
-Queried {max_iter} spots (with replacement), of which {confident_count} made up confident single cells.
+            print(
+                f"""--- Summary ---
+Queried <={max_iter} spots (with replacement), of which {confident_count} made up confident single cells.
 Classes total (this round): {class_count}
 Coverage: {coverage*100:.2f}%
 --- --- --- --- ---
-""")
+"""
+            )
         return
 
     def run_getSingleCellAnnData(
@@ -402,8 +407,7 @@ Coverage: {coverage*100:.2f}%
         sc_X = []
         raw_X = self.adata_spatial.X.toarray()
         for ix_new in self.sampleIds_new:
-            sc_X.append(
-                list(raw_X[_np.array(self.filtrations[ix_new]), :].sum(axis=0)))
+            sc_X.append(list(raw_X[_np.array(self.filtrations[ix_new]), :].sum(axis=0)))
         sc_adata = _AnnData(
             X=_csr_matrix(sc_X),
             obs=self.adata_spatial.obs.copy().iloc[self.sampleIds_new],
@@ -411,8 +415,7 @@ Coverage: {coverage*100:.2f}%
         )
         sc_adata.obs["confidence"] = 0.0
         for ix_new in self.sampleIds_new:
-            sc_adata.obs.loc[str(
-                ix_new), "confidence"] = self.confidences_new[ix_new]
+            sc_adata.obs.loc[str(ix_new), "confidence"] = self.confidences_new[ix_new]
         if "cell_type" in sc_adata.obs.columns:
             sc_adata.obs["cell_type_old"] = sc_adata.obs["cell_type"].copy()
         sc_adata.obs["cell_type"] = list(self.classes_new.values())
@@ -437,15 +440,15 @@ Coverage: {coverage*100:.2f}%
         import seaborn as sns
 
         spatial_classes = self.get_spatial_classes().astype(str)
-        hue_order=_np.sort(_np.unique(spatial_classes))
-        if '-1' == hue_order[0]:
+        hue_order = _np.sort(_np.unique(spatial_classes))
+        if "-1" == hue_order[0]:
             hue_order[:-1] = hue_order[1:]
-            hue_order[-1] = '-1'
+            hue_order[-1] = "-1"
         return sns.scatterplot(
             x=self.adata_spatial.obs["x"].values,
             y=self.adata_spatial.obs["y"].values,
             hue=spatial_classes,
-            hue_order=hue_order
+            hue_order=hue_order,
         )
 
     def run_plotNewIds(self):
@@ -491,7 +494,7 @@ class SpatialHandler(_SpatialHandlerBase):
         allow_cell_overlap (bool): allows cells to share some of the
         spots. The cell-type of a spot is defined as the type it was
         last assigned to.
-        """
+    """
 
     def __init__(
         self,
@@ -513,8 +516,10 @@ class SpatialHandler(_SpatialHandlerBase):
         )
         self.threshold_delta_n_features: int = threshold_delta_n_features
         self.cache_n_features: dict[int, list[int]] = dict()
+        self._premapped: bool = False
         return
 
+    # Overwrite
     def __repr__(self) -> str:
         return f"""--- Spatial Handler Autopilot (pytacs) ---
 - adata_spatial: {self.adata_spatial}
@@ -524,13 +529,15 @@ class SpatialHandler(_SpatialHandlerBase):
     + has_negative_control: {self.has_negative_control}
 - max_spots_per_cell: {self.max_spots_per_cell}
 - scale_rbf: {self.scale_rbf}
+- allow_cell_overlap: {self.allow_cell_overlap}
+- pre-mapped: {self._premapped}
 - filtrations: {len(self.filtrations)} fitted
 - single-cell segmentation:
     + new samples: {len(self.sampleIds_new)}
     + AnnData: {self.cache_singleCellAnnData}
 --- --- --- --- --- ---
 """
-    
+
     # Overwrite
     def clear_cache(self):
         self.cache_n_features = dict()
@@ -563,8 +570,7 @@ class SpatialHandler(_SpatialHandlerBase):
         self.adata_spatial.obsm["confidence_premapping1"] = confidence_premapping
 
         # <<< Reset the confidence threshold
-        self.local_classifier.set_threshold_confidence(
-            value=threshold_confidence_old)
+        self.local_classifier.set_threshold_confidence(value=threshold_confidence_old)
         return
 
     def _secondRound_preMapping(self) -> None:
@@ -582,22 +588,15 @@ class SpatialHandler(_SpatialHandlerBase):
         The second-round pre-mapping takes into account context
         information."""
 
-        self.adata_spatial.obsm["confidence_premapping2"] = self\
-            .adata_spatial\
-                .obsm["confidence_premapping1"]\
-                    .copy()
-        
+        self.adata_spatial.obsm["confidence_premapping2"] = self.adata_spatial.obsm[
+            "confidence_premapping1"
+        ].copy()
 
-        for i_spot in range(self.adata_spatial.shape[0]):
+        for i_spot in tqdm(range(self.adata_spatial.shape[0])):
             # Get adjacent neighbors
-            ixs_adj: NDArray[_np.int_] = super(
-            )._find_adjacentOfOneSpot_spotIds(i_spot)
+            ixs_adj: NDArray[_np.int_] = super()._find_adjacentOfOneSpot_spotIds(i_spot)
             # Exlucding self
-            ixs_adj = _np.array(
-                list(
-                    set(ixs_adj) - {i_spot}
-                )
-            )
+            ixs_adj = _np.array(list(set(ixs_adj) - {i_spot}))
             if len(ixs_adj) == 0:  # if no neighbors, skip
                 continue
             # Extract confidences
@@ -605,33 +604,28 @@ class SpatialHandler(_SpatialHandlerBase):
                 "confidence_premapping1"
             ][ixs_adj, :]
             # If confident enough, skip
-            if _np.max(self.adata_spatial.obsm[
-                'confidence_premapping1'
-            ][i_spot, :]) >= self.threshold_confidence:
+            if (
+                _np.max(self.adata_spatial.obsm["confidence_premapping1"][i_spot, :])
+                >= self.threshold_confidence
+            ):
                 continue
             # Probs within context
-            self.adata_spatial.obsm[
-                'confidence_premapping2'
-            ][i_spot, :] *= _np.mean(confidences_adj, axis=0)
-            # Normalize to sum of 1
-            self.adata_spatial.obsm[
-                'confidence_premapping2'
-            ][i_spot, :] /= _np.sum(
-                self.adata_spatial.obsm[
-                    'confidence_premapping2'
-                ][i_spot, :]
+            self.adata_spatial.obsm["confidence_premapping2"][i_spot, :] *= _np.mean(
+                confidences_adj, axis=0
             )
-        
+            # Normalize to sum of 1
+            self.adata_spatial.obsm["confidence_premapping2"][i_spot, :] /= _np.sum(
+                self.adata_spatial.obsm["confidence_premapping2"][i_spot, :]
+            )
+
         # Annotate the second-round cell-type
-        self.adata_spatial.obs['cell_type_premapping2'] = _np.argmax(
-            self.adata_spatial.obsm[
-                'confidence_premapping2'
-            ],
+        self.adata_spatial.obs["cell_type_premapping2"] = _np.argmax(
+            self.adata_spatial.obsm["confidence_premapping2"],
             axis=1,
         )
         return
-    
-    def _buildFiltration_addOneSpot(self, idx_centroid, verbose = True):
+
+    def _buildFiltration_addOneSpot(self, idx_centroid, verbose=True):
         """Adds one spot for the cell centered at idx_centroid.
 
         Filtration list includes idx_centroid itself.
@@ -639,17 +633,17 @@ class SpatialHandler(_SpatialHandlerBase):
         Update the self.filtrations, self.cache_aggregated_counts,
          self.cache_n_features,
          and returns the added spot index (-1 for not added)."""
-        loc_centroid: _np.ndarray = self.adata_spatial.obs[
-            ['x', 'y']
-        ].values[idx_centroid, :]
+        loc_centroid: _np.ndarray = self.adata_spatial.obs[["x", "y"]].values[
+            idx_centroid, :
+        ]
         self._filtrations[idx_centroid] = self._filtrations.get(
             idx_centroid, [idx_centroid]
         )
         self.cache_aggregated_counts[idx_centroid] = self.cache_aggregated_counts.get(
-            idx_centroid, _to_array(self.adata_spatial.X[[idx_centroid], :])[0,:]
+            idx_centroid, _to_array(self.adata_spatial.X[[idx_centroid], :])[0, :]
         )
         self.cache_n_features[idx_centroid] = self.cache_n_features.get(
-            idx_centroid, [int((self.cache_aggregated_counts[idx_centroid]>0).sum())]
+            idx_centroid, [int((self.cache_aggregated_counts[idx_centroid] > 0).sum())]
         )
 
         # Stop if max_spots_per_cell reached
@@ -676,11 +670,17 @@ class SpatialHandler(_SpatialHandlerBase):
         for idx in idxs_adjacent:
             loc_adj = self.adata_spatial.obs[["x", "y"]].values[idx, :]
             probs_.append(
-                _rbf(loc_adj, loc_centroid,
-                     scale=self.scale_rbf,
-                ) * self.adata_spatial\
-                    .obsm['confidence_premapping2'][idx, self.adata_spatial\
-                        .obs.loc[str(idx_centroid), 'cell_type_premapping2']]
+                _rbf(
+                    loc_adj,
+                    loc_centroid,
+                    scale=self.scale_rbf,
+                )
+                * self.adata_spatial.obsm["confidence_premapping2"][
+                    idx,
+                    self.adata_spatial.obs.loc[
+                        str(idx_centroid), "cell_type_premapping2"
+                    ],
+                ]
             )
         probs: NDArray[_np.float_] = _np.array(probs_)
         probs /= _np.sum(probs_)
@@ -690,20 +690,19 @@ class SpatialHandler(_SpatialHandlerBase):
         self._filtrations[idx_centroid].append(idx_selected)
         # Update the aggregated counts cache, n_features cache
         self.cache_aggregated_counts[idx_centroid] += _to_array(
-            self.adata_spatial.X[[idx_selected], :])[0,:]
+            self.adata_spatial.X[[idx_selected], :]
+        )[0, :]
         self.cache_n_features[idx_centroid].append(
-            int(
-                (self.cache_aggregated_counts[idx_centroid]>0).sum()
-            )
+            int((self.cache_aggregated_counts[idx_centroid] > 0).sum())
         )
         return idx_selected
-    
+
     def _buildFiltration_addSpotsUntilConfident(
-            self,
-            idx_centroid: int,
-            n_spots_add_per_step: int = 1,
-            verbose: bool = True,
-        ) -> tuple[float, int, int]:
+        self,
+        idx_centroid: int,
+        n_spots_add_per_step: int = 1,
+        verbose: bool = True,
+    ) -> tuple[float, int, int]:
         """Find many spots centered at idx_centroid that are confidently in a class.
 
         Update the self.filtrations, update the self.mask_newIds, self.confidences_new,
@@ -716,15 +715,18 @@ class SpatialHandler(_SpatialHandlerBase):
         label: int = -1  # cell type assigned, -1 for not confident
         confidence: float = 0.0
         n_features_old: int = 0
+        self.cache_n_features[idx_centroid] = self.cache_n_features.get(
+            idx_centroid,
+            [int((self.cache_aggregated_counts[idx_centroid] > 0).sum())],
+        )
         for _ in range(self.max_spots_per_cell):
-            probas = self._compute_confidence_of_level(idx_centroid)
+            probas = self._compute_confidence_of_filtration(idx_centroid)
             label = int(_np.argmax(probas))
-            self.cache_n_features[idx_centroid] = self.cache_n_features.get(
-                idx_centroid, [int((self.cache_aggregated_counts[idx_centroid]>0).sum())]
-            )
             n_features: int = self.cache_n_features[idx_centroid][-1]
             # Dynamically changes premapped cell-type
-            self.adata_spatial.obs['cell_type_premapping2'] = label
+            self.adata_spatial.obs.loc[str(idx_centroid), "cell_type_premapping2"] = (
+                label
+            )
             confidence = probas[label]
             if confidence >= self.threshold_confidence:
                 self._mask_newIds[_np.array(self.filtrations[idx_centroid])] = (
@@ -735,14 +737,14 @@ class SpatialHandler(_SpatialHandlerBase):
                 if n_features - n_features_old <= self.threshold_delta_n_features:
                     break
             n_features_old = n_features
-            # Add n cells per step.
+            # Add n spots per step.
             for i_add in range(n_spots_add_per_step):
                 idx_added = self._buildFiltration_addOneSpot(
                     idx_centroid, verbose=verbose
                 )
                 if idx_added == -1:
                     # Final calculation
-                    probas = self._compute_confidence_of_level(idx_centroid)
+                    probas = self._compute_confidence_of_filtration(idx_centroid)
                     label = int(_np.argmax(probas))
                     confidence = probas[label]
                     if confidence >= self.threshold_confidence:
@@ -765,9 +767,315 @@ class SpatialHandler(_SpatialHandlerBase):
             del self.cache_n_features[idx_centroid]
         # Clear aggregated counts cache once their confidences are determined,
         # whether positive or not.
-        try:
-            del self.cache_aggregated_counts[idx_centroid]
-        except KeyError as kerr:
-            pass  # Key not existing is allowed.
+        del self.cache_aggregated_counts[idx_centroid]
 
         return (confidence, label, idx_centroid)
+
+    def run_preMapping(self, verbose: bool = True) -> None:
+        if verbose:
+            print("Running first round premapping ...")
+        self._firstRound_preMapping()
+        if verbose:
+            print("Running second round premapping ...")
+        self._secondRound_preMapping()
+        self._premapped = True
+        if verbose:
+            print("Done.")
+        return
+
+    # Overwrite
+    def run_segmentation(
+        self,
+        n_spots_add_per_step: int = 1,
+        coverage_to_stop: float = 0.8,
+        max_iter: int = 200,
+        verbose: bool = True,
+        warnings: bool = False,
+        print_summary: bool = True,
+    ):
+        assert self._premapped, "Must .run_preMapping() first!"
+        return super().run_segmentation(
+            n_spots_add_per_step,
+            coverage_to_stop,
+            max_iter,
+            verbose,
+            warnings,
+            print_summary,
+        )
+
+
+class SpatialHandlerParallel(SpatialHandler):
+    """A spatial handler to produce filtrations
+    self-guidedly, integrate spots into single cells,
+    and estimate their confidences, in a parallel manner.
+
+    Parallelism makes computation faster, but requires more memory.
+
+    Note that this module always allows cells to share some of the
+    spots. The cell-type of a spot is defined as the type it was
+    last assigned to.
+
+    Args:
+        adata_spatial (AnnData): subcellular spatial transcriptomic
+        AnnData, like Stereo-seq, with .obs[['x', 'y']] indicating
+        the locations of spots.
+
+        local_classifier (LocalClassifier): a trained local classifier
+        on reference scRNA data.
+
+        threshold_adjacent (float): spots within this distance are
+        considered adjacent. for integer-indexed spots, 1.2 for
+        4-neighbor adjacency and 1.5 for 8-neighbor adjacency.
+
+        max_spots_per_cell (int): max number of spots of a single
+        cell.
+
+        scale_rbf (float): next spot to add is selected from adjacent
+        spots, with a coefficient of radial basis function probability,
+        whose scale factor is this parameter.
+
+        threshold_delta_n_features (int): after reaching threshold_confidence,
+        the process of building a filtration (adding spots to it) would not
+        stop until the stepwise change in n_features is less than
+        `threshold_delta_n_features`.
+
+        n_parallel (int): build `n_parallel` filtrations parallelly through a
+        vector-broadcasting mechanism.
+    """
+
+    def __init__(
+        self,
+        adata_spatial: _AnnData,
+        local_classifier: _LocalClassifier,
+        threshold_adjacent: float = 1.2,
+        max_spots_per_cell: int = 81,
+        scale_rbf: float = 1.0,
+        threshold_delta_n_features: int = 10,
+        n_parallel: int = 50,
+    ):
+        super().__init__(
+            adata_spatial=adata_spatial,
+            local_classifier=local_classifier,
+            threshold_adjacent=threshold_adjacent,
+            max_spots_per_cell=max_spots_per_cell,
+            scale_rbf=scale_rbf,
+            threshold_delta_n_features=threshold_delta_n_features,
+            allow_cell_overlap=True,
+        )
+        self.n_parallel: int = n_parallel
+        return
+
+    # Overwrite
+    def __repr__(self) -> str:
+        return f"""--- Spatial Handler Autopilot Parallel (pytacs) ---
+- adata_spatial: {self.adata_spatial}
+- threshold_adjacent: {self.threshold_adjacent}
+- local_classifier: {self.local_classifier}
+    + threshold_confidence: {self.threshold_confidence}
+    + has_negative_control: {self.has_negative_control}
+- max_spots_per_cell: {self.max_spots_per_cell}
+- scale_rbf: {self.scale_rbf}
+- pre-mapped: {self._premapped}
+- n_parallel: {self.n_parallel}
+- filtrations: {len(self.filtrations)} fitted
+- single-cell segmentation:
+    + new samples: {len(self.sampleIds_new)}
+    + AnnData: {self.cache_singleCellAnnData}
+--- --- --- --- --- ---
+"""
+
+    # Overwrite
+    def _aggregate_spots_given_filtration(
+        self,
+        idx_centroids: NDArray[_np.int_],
+    ) -> NDArray[_np.int_ | _np.float_]:
+        """Returns a 2d-array of counts of genes (idx-by-gene). Load from cache."""
+        dtype = self.adata_spatial.X.dtype
+        result: _np.ndarray = _np.zeros(
+            shape=(len(idx_centroids), self.adata_spatial.shape[1]),
+            dtype=dtype,
+        )
+        for i_idx, idx in enumerate(idx_centroids):
+            self.cache_aggregated_counts[idx] = self.cache_aggregated_counts.get(
+                idx,
+                _to_array(self.adata_spatial.X[[idx], :])[0, :],
+            )
+            result[i_idx, :] = self.cache_aggregated_counts[idx]
+        return result
+
+    # Overwrite
+    def _compute_confidence_of_filtration(
+        self,
+        idx_centroids: NDArray[_np.int_],
+    ) -> NDArray[_np.float_]:
+        """Calculate confidences of filtrations to each class,
+        EXCLUDING the negative control, if exists.
+        Return an idx-by-class 2d-array."""
+        # Collect filtrations
+        for idx in idx_centroids:
+            self._filtrations[idx] = self._filtrations.get(idx, [idx])
+        probas: NDArray[_np.float_] = self.local_classifier.predict_proba(
+            X=self._aggregate_spots_given_filtration(idx_centroids),
+            genes=self.adata_spatial.var.index,
+        )
+        # Only keeps positive classes
+        if self.has_negative_control:
+            probas = probas[:-1]
+        return probas
+
+    def _buildFiltration_addSpotsUntilConfident(
+        self,
+        idx_centroids: NDArray[_np.int_],
+        n_spots_add_per_step: int = 1,
+        verbose: bool = True,
+    ) -> tuple[NDArray[_np.float_], NDArray[_np.int_], NDArray[_np.int_]]:
+        """Find many spots centered at idx_centroids that are confidently in a class.
+
+        Update the self.filtrations, update the self.mask_newIds, self.confidences_new,
+         self.classes_new,
+         and returns the (confidences, class_ids, new_sampleIds).
+        Keeps building until self.threshold_delta_n_features met or max_spots_per_cell
+         met, whether confident or not.
+        If reaches max_spots_per_cell and still not confident, that class_id is set to -1.
+        """
+        labels: NDArray[_np.int_] = _np.full(
+            shape=len(idx_centroids),
+            fill_value=-1,
+            dtype=int,
+        )  # cell types assigned, -1 for not confident
+        confidences: NDArray[_np.float_] = _np.full(
+            shape=len(idx_centroids),
+            fill_value=0.0,
+            dtype=float,
+        )
+        nums_features_old: NDArray[_np.int_] = _np.zeros(
+            shape=len(idx_centroids),
+            dtype=int,
+        )
+        for idx in idx_centroids:
+            self.cache_n_features[idx] = self.cache_n_features.get(
+                idx,
+                [int((self.cache_aggregated_counts[idx] > 0).sum())],
+            )
+        for i_step_add_spot in range(self.max_spots_per_cell):
+            probas = self._compute_confidence_of_filtration(idx_centroids)
+            labels = _np.argmax(probas, axis=1)
+            nums_features: NDArray[_np.int_] = _np.array(
+                [self.cache_n_features[idx][-1] for idx in idx_centroids]
+            )
+            # Dynamically changes premapped cell-type
+            self.adata_spatial.obs.loc[
+                _np.array(idx_centroids).astype(str), "cell_type_premapping2"
+            ] = labels
+            confidences = probas[_np.arange(len(idx_centroids)), labels]
+            for i_idx, confidence in enumerate(confidences):
+                idx: int = idx_centroids[i_idx]
+                if confidence >= self.threshold_confidence:
+                    self._mask_newIds[_np.array(self.filtrations[idx])] = idx
+                    self._classes_new[idx] = labels[i_idx]
+                    self._confidences_new[idx] = confidence
+                if (
+                    nums_features[i_idx] - nums_features_old[i_idx]
+                    > self.threshold_delta_n_features
+                ) or (confidence < self.threshold_confidence):
+                    # Add n spots
+                    for i_add in range(n_spots_add_per_step):
+                        idx_added = self._buildFiltration_addOneSpot(
+                            idx,
+                            verbose,
+                        )
+                        if idx_added == -1:  # exhausted
+                            break
+                    nums_features_old[i_idx] = nums_features[i_idx]
+                    continue
+            # Stop criteria
+            if _np.all(confidences > self.threshold_confidence) and _np.all(
+                nums_features - nums_features_old <= self.threshold_delta_n_features
+            ):
+                break
+
+        else:  # reaches max_spots
+            labels[confidences < self.threshold_confidence] = -1
+        # Clear unconfident caches
+        for i_idx, label in enumerate(labels):
+            if label == -1:
+                idx = idx_centroids[i_idx]
+                del self._filtrations[idx]
+                del self.cache_n_features[idx]
+            # Clear aggregated counts cache once their confidences are determined,
+            # whether positive or not.
+            del self.cache_aggregated_counts[idx]
+
+        return (
+            confidences,
+            labels,
+            idx_centroids,
+        )
+
+    # Overwrite
+    def run_segmentation(
+        self,
+        n_spots_add_per_step: int = 1,
+        coverage_to_stop: float = 0.8,
+        max_iter: int = 200,
+        verbose: bool = True,
+        warnings: bool = False,
+        print_summary: bool = True,
+    ):
+        """Segments the spots into single cells. Spots to query are selected sequentially,
+        `self.n_parallel` in a batch.
+        Updates self.sampleIds_new, self.confidences_new, self.classes_new."""
+        assert self._premapped, "Must .run_preMapping() first!"
+        confident_count = 0
+        class_count: dict[int, int] = dict()
+        queried_spotIds = set()
+        for i_iter in range(max_iter):
+            if verbose and i_iter % 5 == 0:
+                print(f"Iter {i_iter+1}:")
+            available_spots: list[int] = list(
+                set(self.unmasked_spotIds) - queried_spotIds
+            )
+            if len(available_spots) == 0:
+                print("All spots queried.")
+                break
+            idx_centroids: NDArray[_np.int_] = _np.random.choice(
+                a=available_spots,
+                size=min(self.n_parallel, len(available_spots)),
+                replace=False,
+            )
+            queried_spotIds |= set(idx_centroids)
+            if verbose and i_iter % 5 == 0:
+                print(f"Querying {len(idx_centroids)} spots ...")
+            confs, labels, _ = self._buildFiltration_addSpotsUntilConfident(
+                idx_centroids=idx_centroids,
+                n_spots_add_per_step=n_spots_add_per_step,
+                verbose=warnings,
+            )
+            confident_count += (confs >= self.threshold_confidence).sum()
+            for label in labels:
+                class_count[label] = class_count.get(label, 0) + 1
+            if verbose and i_iter % 5 == 0:
+                print(
+                    f"Cell {idx_centroids[0]}, ... | Confidence: {confs[0]:.3e}, ... | Confident total: {confident_count} | class: {labels[0]}, ..."
+                )
+                print(f"Classes total: {class_count}")
+            coverage = (self.mask_newIds > -1).sum() / len(self.mask_newIds)
+            if verbose and i_iter % 5 == 0:
+                print(f"Coverage: {coverage*100:.2f}%")
+            if coverage == coverage_to_stop:
+                break
+        else:
+            if warnings:
+                print(f"Reaches max_iter {max_iter}!")
+        if verbose:
+            print("Done.")
+        if print_summary:
+            print(
+                f"""--- Summary ---
+Queried {len(queried_spotIds)} spots, of which {confident_count} made up confident single cells.
+Classes total: {class_count}
+Coverage: {coverage*100:.2f}%
+--- --- --- --- ---
+"""
+            )
+        return

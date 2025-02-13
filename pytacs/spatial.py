@@ -212,7 +212,7 @@ class _SpatialHandlerBase:
         )
         if len(self._filtrations[idx_centroid]) >= self.max_spots_per_cell:
             if verbose:
-                print(
+                tqdm.write(
                     f"Warning: reaches max_spots_per_cell {
                         self.max_spots_per_cell}"
                 )
@@ -223,7 +223,7 @@ class _SpatialHandlerBase:
         )
         if len(idxs_adjacent) == 0:
             if verbose:
-                print(
+                tqdm.write(
                     f"Warning: no adjacent spots found! Check threshold_adjacent {
                         self.threshold_adjacent}"
                 )
@@ -346,16 +346,16 @@ class _SpatialHandlerBase:
         Updates self.sampleIds_new, self.confidences_new, self.classes_new."""
         confident_count = 0
         class_count: dict[int, int] = dict()
-        for i_iter in range(max_iter):
+        for i_iter in tqdm(range(max_iter)):
             if verbose and i_iter % 5 == 0:
-                print(f"Iteration {i_iter+1}:")
+                tqdm.write(f"Iteration {i_iter+1}:")
             available_spots = self.unmasked_spotIds
             if len(available_spots) == 0:
-                print("All spots queried. Done.")
+                tqdm.write("All spots queried. Done.")
                 break
             ix_centroid = _np.random.choice(available_spots)
             if verbose and i_iter % 5 == 0:
-                print(f"Querying spot {ix_centroid} ...")
+                tqdm.write(f"Querying spot {ix_centroid} ...")
             conf, label, _ = self._buildFiltration_addSpotsUntilConfident(
                 idx_centroid=ix_centroid,
                 n_spots_add_per_step=n_spots_add_per_step,
@@ -365,23 +365,23 @@ class _SpatialHandlerBase:
                 confident_count += 1
                 class_count[label] = class_count.get(label, 0) + 1
             if verbose and i_iter % 5 == 0:
-                print(
+                tqdm.write(
                     f"Spot {ix_centroid} | confidence: {conf:.3e} | confident total: {
                         confident_count} | class: {label}"
                 )
-                print(f"Classes total: {class_count}")
+                tqdm.write(f"Classes total: {class_count}")
             coverage = (self.mask_newIds > -1).sum() / len(self.mask_newIds)
             if verbose and i_iter % 5 == 0:
-                print(f"Coverage: {coverage*100:.2f}%")
+                tqdm.write(f"Coverage: {coverage*100:.2f}%")
             if coverage >= coverage_to_stop:
                 break
         else:
             if warnings:
-                print(f"Reaches max_iter {max_iter}!")
+                tqdm.write(f"Reaches max_iter {max_iter}!")
         if verbose:
-            print("Done.")
+            tqdm.write("Done.")
         if print_summary:
-            print(
+            tqdm.write(
                 f"""--- Summary ---
 Queried <={max_iter} spots (with replacement), of which {confident_count} made up confident single cells.
 Classes total (this round): {class_count}
@@ -645,7 +645,7 @@ class SpatialHandler(_SpatialHandlerBase):
         # Stop if max_spots_per_cell reached
         if len(self._filtrations[idx_centroid]) >= self.max_spots_per_cell:
             if verbose:
-                print(
+                tqdm.write(
                     f"Warning: reaches max_spots_per_cell {
                         self.max_spots_per_cell}"
                 )
@@ -656,7 +656,7 @@ class SpatialHandler(_SpatialHandlerBase):
         )
         if len(idxs_adjacent) == 0:
             if verbose:
-                print(
+                tqdm.write(
                     f"Warning: no adjacent spots found! Check threshold_adjacent {
                         self.threshold_adjacent}"
                 )
@@ -773,14 +773,14 @@ class SpatialHandler(_SpatialHandlerBase):
 
     def run_preMapping(self, verbose: bool = True) -> None:
         if verbose:
-            print("Running first round premapping ...")
+            tqdm.write("Running first round premapping ...")
         self._firstRound_preMapping()
         if verbose:
-            print("Running second round premapping ...")
+            tqdm.write("Running second round premapping ...")
         self._secondRound_preMapping()
         self._premapped = True
         if verbose:
-            print("Done.")
+            tqdm.write("Done.")
         return
 
     # Overwrite
@@ -1037,14 +1037,14 @@ class SpatialHandlerParallel(SpatialHandler):
         confident_count = 0
         class_count: dict[int, int] = dict()
         queried_spotIds = set()
-        for i_iter in range(max_iter):
+        for i_iter in tqdm(range(max_iter)):
             if verbose and i_iter % 5 == 0:
-                print(f"Iter {i_iter+1}:")
+                tqdm.write(f"Iter {i_iter+1}:")
             available_spots: list[int] = list(
                 set(self.unmasked_spotIds) - queried_spotIds
             )
             if len(available_spots) == 0:
-                print("All spots queried.")
+                tqdm.write("All spots queried.")
                 break
             idx_centroids: NDArray[_np.int_] = _np.random.choice(
                 a=available_spots,
@@ -1053,7 +1053,7 @@ class SpatialHandlerParallel(SpatialHandler):
             )
             queried_spotIds |= set(idx_centroids)
             if verbose and i_iter % 5 == 0:
-                print(f"Querying {len(idx_centroids)} spots ...")
+                tqdm.write(f"Querying {len(idx_centroids)} spots ...")
             confs, labels, _ = self._buildFiltration_addSpotsUntilConfident(
                 idx_centroids=idx_centroids,
                 n_spots_add_per_step=n_spots_add_per_step,
@@ -1063,22 +1063,22 @@ class SpatialHandlerParallel(SpatialHandler):
             for label in labels:
                 class_count[label] = class_count.get(label, 0) + 1
             if verbose and i_iter % 5 == 0:
-                print(
+                tqdm.write(
                     f"Cell {idx_centroids[0]}, ... | Confidence: {confs[0]:.3e}, ... | Confident total: {confident_count} | class: {labels[0]}, ..."
                 )
-                print(f"Classes total: {class_count}")
+                tqdm.write(f"Classes total: {class_count}")
             coverage = (self.mask_newIds > -1).sum() / len(self.mask_newIds)
             if verbose and i_iter % 5 == 0:
-                print(f"Coverage: {coverage*100:.2f}%")
-            if coverage == coverage_to_stop:
+                tqdm.write(f"Coverage: {coverage*100:.2f}%")
+            if coverage >= coverage_to_stop:
                 break
         else:
             if warnings:
-                print(f"Reaches max_iter {max_iter}!")
+                tqdm.write(f"Reaches max_iter {max_iter}!")
         if verbose:
-            print("Done.")
+            tqdm.write("Done.")
         if print_summary:
-            print(
+            tqdm.write(
                 f"""--- Summary ---
 Queried {len(queried_spotIds)} spots, of which {confident_count} made up confident single cells.
 Classes total: {class_count}

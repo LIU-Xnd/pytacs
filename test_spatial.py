@@ -11,6 +11,7 @@ data_preper = AnnDataPreparer(
     sp_adata=sc.read_h5ad("spRNA_mouse_demo.h5ad"),
 )
 print(data_preper)
+print(f"{data_preper.sp_adata.obs=}")
 
 print("Step 2. Train a local classifier")
 clf = SVM(threshold_confidence=0.75)
@@ -21,12 +22,12 @@ print("Test SpatialHandlerAutopilot")
 sph = SpatialHandlerParallel(
     adata_spatial=data_preper.sp_adata,
     local_classifier=clf,
-    threshold_adjacent=3,
+    threshold_adjacent=1.3,
     threshold_delta_n_features=0,
     max_spots_per_cell=20,
-    n_parallel=50,
+    n_parallel=1000,
 )
 print(sph)
 sph.run_preMapping()
-sph.run_segmentation(3, warnings=True)
+sph.run_segmentation(3, warnings=False)
 print(sph)

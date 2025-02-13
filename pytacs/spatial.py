@@ -107,7 +107,17 @@ class _SpatialHandlerBase:
     @property
     def mask_newIds(self) -> NDArray[_np.int_]:
         """Return a copy of mask of new ids.
-        (Last come first, if allow_cell_overlap.)"""
+        Note! If allow_cell_overlap is True, then a last-come-first strategy
+        is used, in which case, each spot
+        might be assigned to more than one cell, meaning that
+        each cell might have more than one new sample id.
+        In this case, !! DO NOT !! use this mask for sample_id finding
+        because some new ids might be overhidden by other cells, but
+        just use this property as an indicator of whether a spot
+        is being assigned to a cell.
+        If you want to find the UNIQUE new id of each cell, use
+        .filtrations.keys().
+        """
         return self._mask_newIds.copy()
 
     @property
@@ -122,8 +132,8 @@ class _SpatialHandlerBase:
 
     @property
     def sampleIds_new(self) -> NDArray[_np.int_]:
-        """Return an array of curretly existing new sample indices, EXCLUDING -1."""
-        return _np.sort(_np.array(list(set(list(_np.unique(self.mask_newIds))) - {-1})))
+        """Return an array of currently existing new sample indices, EXCLUDING -1."""
+        return _np.sort(list(self._filtrations.keys()))
 
     @property
     def classes_new(self) -> dict:
@@ -424,7 +434,11 @@ Coverage: {coverage*100:.2f}%
         """Get an array of integers, corresponding to class ids of each old sample (spot)."""
         res = _np.zeros(shape=(self.adata_spatial.shape[0],), dtype=int)
         for i_sample in range(len(res)):
-            new_id = self.mask_newIds[i_sample]
+            # First query the filtrations.keys()
+            if i_sample in self._filtrations.keys():
+                new_id = i_sample
+            else:  # Thereafter, query the mask
+                new_id = self.mask_newIds[i_sample]
             if new_id == -1:
                 res[i_sample] = -1
                 continue

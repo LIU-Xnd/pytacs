@@ -1075,6 +1075,8 @@ class SpatialHandlerParallel(SpatialHandler):
             )
             confident_count += (confs >= self.threshold_confidence).sum()
             for label in labels:
+                if label == -1:
+                    continue
                 class_count[label] = class_count.get(label, 0) + 1
             if verbose and i_iter % 5 == 0:
                 tqdm.write(

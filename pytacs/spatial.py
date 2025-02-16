@@ -500,6 +500,7 @@ class SpatialHandler(_SpatialHandlerBase):
         the process of building a filtration (adding spots to it) would not
         stop until the stepwise change in n_features is less than
         `threshold_delta_n_features`.
+        !! Bugs exist! For now set it to 100_000.
 
         allow_cell_overlap (bool): allows cells to share some of the
         spots. The cell-type of a spot is defined as the type it was
@@ -1018,6 +1019,7 @@ class SpatialHandlerParallel(SpatialHandler):
 
         else:  # reaches max_spots
             labels[confidences < self.threshold_confidence] = -1
+            # BUG: after n_features converges, some confidence might be unconfident again! Drop this feature for now.
         # Clear unconfident caches
         for i_idx, label in enumerate(labels):
             idx = idx_centroids[i_idx]

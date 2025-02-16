@@ -32,7 +32,10 @@ including main dependencies is listed in `pyproject.toml`.
 
 
 ## Usage
-```
+
+For detailed usage, see [Basic_Usage_of_pytacs.md](./Basic_Usage_of_pytacs.md)
+
+```{Python}
 >>> import pytacs as tx
 
 # Step 1. Prepare the snRNA-seq and spRNA-seq data
@@ -43,7 +46,8 @@ including main dependencies is listed in `pyproject.toml`.
 >>> clf.fit(data_prep.sn_adata)
 
 # Step 3. Integrate spatial spots into single-cell spots
->>> sph = tx.SpatialHandler(data_prep.sp_adata, clf)
+>>> sph = tx.SpatialHandlerParallel(data_prep.sp_adata, clf)
+>>> sph.run_preMapping()
 >>> sph.run_segmentation()
 
 # Get the integrated single-cell ST data
@@ -51,4 +55,4 @@ including main dependencies is listed in `pyproject.toml`.
 ```
 
 ## Demo
-[demo.ipynb](./demo.ipynb)
+[Test_on_synthetic_data_version1.1.3_autopilot.ipynb.ipynb](./Test_on_synthetic_data_version1.1.3_autopilot.ipynb)

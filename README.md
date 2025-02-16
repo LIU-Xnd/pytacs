@@ -1,21 +1,34 @@
 # Pytacs - Python-implemented Topological Automatic Cell Segmentation
 
-**(Still under construction ...)**
+```
+Copyright (C) 2025 Xindong Liu
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+```
 
 A tool for segmenting/integrating sub-cellular spots in high-resolution spatial
 transcriptomics into single-cellular spots and cell-type mapping.
 
-Ideas are based on (Benjamin et al., 2024)'s work TopACT
+Ideas are inspired by (Benjamin et al., 2024)'s work TopACT
 (see https://gitlab.com/kfbenjamin/topact).
 But Pytacs has improved it in several ways:
 
-1. The shape of predicted cells are diverse rather than a rectangle/grid;
+1. The shape of predicted cells are diverse rather than a rectangle/grid, rendering hopefully higher accuracy;
 2. Provides more types of local classifiers, including Gaussian Naive Bayes Model and
-q-Proximity Confidence Model;
+our q-Proximity Confidence Model;
 3. New strategies are introduced to build a local classifier;
-4. Negative-control samples are introduced for better performance of local classifier
-(experimental);
-5. Provides a more unified input-output protocol (i.e., h5ad format), and users can
+4. Provides a more popular input-output protocol (i.e., h5ad format), and users can
 get integrated single-cell ST output data in h5ad format conveniently.
 
 ## Requirements

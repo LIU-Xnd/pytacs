@@ -3,9 +3,9 @@ name = "pytacs"
 version = "1.1.2"
 description = "Pytacs: Python-implemented Topological Automatic Cell Segmentation"
 authors = [
-    {name = "LIU-Xnd",email = "lqxnds@foxmail.com"}
+    {name = "Xindong Liu",email = "liuxindong@big.ac.cn"}
 ]
-license = "MIT"
+license = "GPL3"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

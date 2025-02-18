@@ -191,7 +191,7 @@ class _SpatialHandlerBase:
         if self.cache_distance_matrix is _UNDEFINED:
             self._compute_distance_matrix()
         assert isinstance(self.cache_distance_matrix, _csr_matrix)
-        distances = self.cache_distance_matrix[idx_this_spot, :].toarray()
+        distances = self.cache_distance_matrix[[idx_this_spot], :].toarray()[0, :]
         idxs_adjacent = _np.where(
             (0 < distances) * (distances <= self.threshold_adjacent)
         )[0]
@@ -212,12 +212,10 @@ class _SpatialHandlerBase:
         adj_spots = []
         for spot in filtration:
             adj_spots += list(self._find_adjacentOfOneSpot_spotIds(spot))
-        return _np.array(
-            list(
-                (set(adj_spots) - set(filtration))
-                - (set(self.masked_spotIds) if not self.allow_cell_overlap else set())
-            )
-        )
+        masked_spotIds = set()
+        if not self.allow_cell_overlap:
+            masked_spotIds = set(self.masked_spotIds)
+        return _np.array(list((set(adj_spots) - set(filtration)) - masked_spotIds))
 
     def _buildFiltration_addOneSpot(
         self,
@@ -371,7 +369,7 @@ class _SpatialHandlerBase:
         Updates self.sampleIds_new, self.confidences_new, self.classes_new."""
         confident_count = 0
         class_count: dict[int, int] = dict()
-        for i_iter in tqdm(range(max_iter)):
+        for i_iter in tqdm(range(max_iter), ncols=60):
             if verbose and i_iter % 5 == 0:
                 tqdm.write(f"Iteration {i_iter+1}:")
             available_spots = self.unmasked_spotIds
@@ -578,6 +576,7 @@ class SpatialHandler(_SpatialHandlerBase):
         for i_batch in tqdm(
             range(confidence_premapping.shape[0] // n_parallel + 1),
             desc="1st premapping",
+            ncols=60,
         ):
             i_samples = _np.arange(
                 i_batch * n_parallel,
@@ -617,7 +616,11 @@ class SpatialHandler(_SpatialHandlerBase):
             "confidence_premapping1"
         ].copy()
 
-        for i_spot in tqdm(range(self.adata_spatial.shape[0]), desc="2nd premapping"):
+        for i_spot in tqdm(
+            range(self.adata_spatial.shape[0]),
+            desc="2nd premapping",
+            ncols=60,
+        ):
             # Get adjacent neighbors
             ixs_adj: NDArray[_np.int_] = super()._find_adjacentOfOneSpot_spotIds(i_spot)
             # Exlucding self
@@ -914,7 +917,7 @@ class SpatialHandlerParallel(SpatialHandler):
         Return an idx-by-class 2d-array."""
         # Collect filtrations
         for idx in idx_centroids:
-            if idx not in self._filtrations.keys():
+            if idx not in self._filtrations:
                 self._filtrations[idx] = [idx]
         probas: NDArray[_np.float_] = self.local_classifier.predict_proba(
             X=self._aggregate_spots_given_filtration(idx_centroids),
@@ -950,11 +953,19 @@ class SpatialHandlerParallel(SpatialHandler):
             dtype=float,
         )
         # Collect filtrations
-        for idx in tqdm(idx_centroids, desc="Init filtrations", leave=False):
+        for idx in tqdm(
+            idx_centroids,
+            desc="Init filtrations",
+            leave=False,
+            ncols=60,
+        ):
             if idx not in self._filtrations:
                 self._filtrations[idx] = [idx]
-        for i_idx, idx in tqdm(
-            enumerate(idx_centroids), desc="Init aggregated counts cache", leave=False
+        for idx in tqdm(
+            idx_centroids,
+            desc="Init aggregated counts cache",
+            leave=False,
+            ncols=60,
         ):
             if idx not in self.cache_aggregated_counts:
                 self.cache_aggregated_counts[idx] = _to_array(
@@ -962,7 +973,9 @@ class SpatialHandlerParallel(SpatialHandler):
                 )[0, :]
         where_running = _np.arange(len(labels))  # Running terms
         for i_step_add_spot in tqdm(
-            range(self.max_spots_per_cell), desc="Building a batch of cells"
+            range(self.max_spots_per_cell),
+            desc="Building a batch of cells",
+            ncols=60,
         ):
             probas = self._compute_confidence_of_filtration(
                 idx_centroids[where_running]
@@ -981,6 +994,7 @@ class SpatialHandlerParallel(SpatialHandler):
                 enumerate(confidences[where_running]),
                 desc="Processing one of the cell",
                 leave=False,
+                ncols=60,
             ):
                 idx: int = idx_centroids[where_running][i_idx]
                 if confidence >= self.threshold_confidence:
@@ -992,7 +1006,10 @@ class SpatialHandlerParallel(SpatialHandler):
                     continue
                 # Add n spots
                 for i_add in tqdm(
-                    range(n_spots_add_per_step), desc="Adding spots", leave=False
+                    range(n_spots_add_per_step),
+                    desc="Adding spots",
+                    leave=False,
+                    ncols=60,
                 ):
                     idx_added = self._buildFiltration_addOneSpot(
                         idx,

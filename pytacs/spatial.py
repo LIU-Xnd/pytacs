@@ -511,12 +511,6 @@ class SpatialHandler(_SpatialHandlerBase):
         spots, with a coefficient of radial basis function probability,
         whose scale factor is this parameter.
 
-        threshold_delta_n_features (int): after reaching threshold_confidence,
-        the process of building a filtration (adding spots to it) would not
-        stop until the stepwise change in n_features is less than
-        `threshold_delta_n_features`.
-        !! Bugs exist! For now set it to 100_000.
-
         allow_cell_overlap (bool): allows cells to share some of the
         spots. The cell-type of a spot is defined as the type it was
         last assigned to.
@@ -530,7 +524,6 @@ class SpatialHandler(_SpatialHandlerBase):
         max_spots_per_cell: int = 81,
         scale_rbf: float = 1.0,
         max_distance: float = 40.0,
-        threshold_delta_n_features: int = 100_000,
         allow_cell_overlap: bool = True,
     ) -> None:
         super().__init__(
@@ -542,8 +535,6 @@ class SpatialHandler(_SpatialHandlerBase):
             max_distance=max_distance,
             allow_cell_overlap=allow_cell_overlap,
         )
-        self.threshold_delta_n_features: int = threshold_delta_n_features
-        self.cache_n_features: dict[int, list[int]] = dict()
         self._premapped: bool = False
         return
 
@@ -565,12 +556,6 @@ class SpatialHandler(_SpatialHandlerBase):
     + AnnData: {self.cache_singleCellAnnData}
 --- --- --- --- --- ---
 """
-
-    # Overwrite
-    def clear_cache(self):
-        self.cache_n_features = dict()
-        super().clear_cache()
-        return
 
     def _firstRound_preMapping(self) -> None:
         """Updates .obsm['confidence_premapping1'].
@@ -659,7 +644,6 @@ class SpatialHandler(_SpatialHandlerBase):
         Filtration list includes idx_centroid itself.
 
         Update the self.filtrations, self.cache_aggregated_counts,
-         self.cache_n_features,
          and returns the added spot index (-1 for not added)."""
         loc_centroid: _np.ndarray = self.adata_spatial.obs[["x", "y"]].values[
             idx_centroid, :
@@ -669,9 +653,6 @@ class SpatialHandler(_SpatialHandlerBase):
         )
         self.cache_aggregated_counts[idx_centroid] = self.cache_aggregated_counts.get(
             idx_centroid, _to_array(self.adata_spatial.X[[idx_centroid], :])[0, :]
-        )
-        self.cache_n_features[idx_centroid] = self.cache_n_features.get(
-            idx_centroid, [int((self.cache_aggregated_counts[idx_centroid] > 0).sum())]
         )
 
         # Stop if max_spots_per_cell reached
@@ -716,13 +697,10 @@ class SpatialHandler(_SpatialHandlerBase):
         idx_selected = _np.random.choice(idxs_adjacent, p=probs)
         # Update the filtration
         self._filtrations[idx_centroid].append(idx_selected)
-        # Update the aggregated counts cache, n_features cache
+        # Update the aggregated counts cache
         self.cache_aggregated_counts[idx_centroid] += _to_array(
             self.adata_spatial.X[[idx_selected], :]
         )[0, :]
-        self.cache_n_features[idx_centroid].append(
-            int((self.cache_aggregated_counts[idx_centroid] > 0).sum())
-        )
         return idx_selected
 
     def _buildFiltration_addSpotsUntilConfident(
@@ -736,25 +714,18 @@ class SpatialHandler(_SpatialHandlerBase):
         Update the self.filtrations, update the self.mask_newIds, self.confidences_new,
          self.classes_new,
          and returns the (confidence, class_id, new_sampleId).
-        Keeps building until self.threshold_delta_n_features met or max_spots_per_cell
-         met, whether confident or not.
+        Keeps building until max_spots_per_cell met.
         If reaches max_spots_per_cell and still not confident, returns the
          (confidence, -1, and idx_centroid)."""
         label: int = -1  # cell type assigned, -1 for not confident
         confidence: float = 0.0
-        n_features_old: int = 0
         # Collect filtrations
         self._filtrations[idx_centroid] = self._filtrations.get(
             idx_centroid, [idx_centroid]
         )
-        self.cache_n_features[idx_centroid] = self.cache_n_features.get(
-            idx_centroid,
-            [int((self.cache_aggregated_counts[idx_centroid] > 0).sum())],
-        )
         for _ in range(self.max_spots_per_cell):
             probas = self._compute_confidence_of_filtration(idx_centroid)
             label = int(_np.argmax(probas))
-            n_features: int = self.cache_n_features[idx_centroid][-1]
             # Dynamically changes premapped cell-type
             self.adata_spatial.obs.loc[str(idx_centroid), "cell_type_premapping2"] = (
                 label
@@ -766,9 +737,7 @@ class SpatialHandler(_SpatialHandlerBase):
                 )
                 self._classes_new[idx_centroid] = label
                 self._confidences_new[idx_centroid] = confidence
-                if n_features - n_features_old <= self.threshold_delta_n_features:
-                    break
-            n_features_old = n_features
+                break
             # Add n spots per step.
             for i_add in range(n_spots_add_per_step):
                 idx_added = self._buildFiltration_addOneSpot(
@@ -796,7 +765,6 @@ class SpatialHandler(_SpatialHandlerBase):
         if label == -1:
             # Clear filtrations that are not confident
             del self._filtrations[idx_centroid]
-            del self.cache_n_features[idx_centroid]
         # Clear aggregated counts cache once their confidences are determined,
         # whether positive or not.
         del self.cache_aggregated_counts[idx_centroid]
@@ -866,12 +834,6 @@ class SpatialHandlerParallel(SpatialHandler):
         spots, with a coefficient of radial basis function probability,
         whose scale factor is this parameter.
 
-        threshold_delta_n_features (int): after reaching threshold_confidence,
-        the process of building a filtration (adding spots to it) would not
-        stop until the stepwise change in n_features is less than
-        `threshold_delta_n_features`.
-        !! Bug exists. For now set to 100_000.
-
         n_parallel (int): build `n_parallel` filtrations parallelly through a
         vector-broadcasting mechanism.
     """
@@ -884,7 +846,6 @@ class SpatialHandlerParallel(SpatialHandler):
         max_spots_per_cell: int = 500,
         scale_rbf: float = 20.0,
         max_distance: float = 40.0,
-        threshold_delta_n_features: int = 100_000,
         n_parallel: int = 10000,
     ):
         super().__init__(
@@ -894,7 +855,6 @@ class SpatialHandlerParallel(SpatialHandler):
             max_spots_per_cell=max_spots_per_cell,
             scale_rbf=scale_rbf,
             max_distance=max_distance,
-            threshold_delta_n_features=threshold_delta_n_features,
             allow_cell_overlap=True,
         )
         self.n_parallel: int = n_parallel
@@ -969,8 +929,7 @@ class SpatialHandlerParallel(SpatialHandler):
         Update the self.filtrations, update the self.mask_newIds, self.confidences_new,
          self.classes_new,
          and returns the (confidences, class_ids, new_sampleIds).
-        Keeps building until self.threshold_delta_n_features met or max_spots_per_cell
-         met, whether confident or not.
+        Keeps building until max_spots_per_cell met.
         If reaches max_spots_per_cell and still not confident, that class_id is set to -1.
         """
         labels: NDArray[_np.int_] = _np.full(
@@ -983,10 +942,6 @@ class SpatialHandlerParallel(SpatialHandler):
             fill_value=0.0,
             dtype=float,
         )
-        nums_features_old: NDArray[_np.int_] = _np.zeros(
-            shape=len(idx_centroids),
-            dtype=int,
-        )
         # Collect filtrations
         for idx in idx_centroids:
             self._filtrations[idx] = self._filtrations.get(idx, [idx])
@@ -995,17 +950,11 @@ class SpatialHandlerParallel(SpatialHandler):
                 idx,
                 _to_array(self.adata_spatial.X[[idx], :])[0, :],
             )
-        for idx in idx_centroids:
-            self.cache_n_features[idx] = self.cache_n_features.get(
-                idx,
-                [int((self.cache_aggregated_counts[idx] > 0).sum())],
-            )
+
         for i_step_add_spot in range(self.max_spots_per_cell):
             probas = self._compute_confidence_of_filtration(idx_centroids)
             labels = _np.argmax(probas, axis=1)
-            nums_features: NDArray[_np.int_] = _np.array(
-                [self.cache_n_features[idx][-1] for idx in idx_centroids]
-            )
+
             # Dynamically changes premapped cell-type
             self.adata_spatial.obs.loc[
                 _np.array(idx_centroids).astype(str), "cell_type_premapping2"
@@ -1017,24 +966,19 @@ class SpatialHandlerParallel(SpatialHandler):
                     self._mask_newIds[_np.array(self.filtrations[idx])] = idx
                     self._classes_new[idx] = labels[i_idx]
                     self._confidences_new[idx] = confidence
-                if (
-                    nums_features[i_idx] - nums_features_old[i_idx]
-                    > self.threshold_delta_n_features
-                ) or (confidence < self.threshold_confidence):
-                    # Add n spots
-                    for i_add in range(n_spots_add_per_step):
-                        idx_added = self._buildFiltration_addOneSpot(
-                            idx,
-                            verbose,
-                        )
-                        if idx_added == -1:  # exhausted
-                            break
-                    nums_features_old[i_idx] = nums_features[i_idx]
-                    continue
+                    # TODO: mark confident and drop
+                    break
+                # Add n spots
+                for i_add in range(n_spots_add_per_step):
+                    idx_added = self._buildFiltration_addOneSpot(
+                        idx,
+                        verbose,
+                    )
+                    if idx_added == -1:  # exhausted #TODO: mark unconfident and drop
+                        break
+                continue
             # Stop criteria
-            if _np.all(confidences > self.threshold_confidence) and _np.all(
-                nums_features - nums_features_old <= self.threshold_delta_n_features
-            ):
+            if _np.all(confidences > self.threshold_confidence):
                 break
 
         else:  # reaches max_spots
@@ -1045,7 +989,6 @@ class SpatialHandlerParallel(SpatialHandler):
             idx = idx_centroids[i_idx]
             if label == -1:
                 del self._filtrations[idx]
-                del self.cache_n_features[idx]
             # Clear aggregated counts cache once their confidences are determined,
             # whether positive or not.
             del self.cache_aggregated_counts[idx]

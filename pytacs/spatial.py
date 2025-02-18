@@ -2,7 +2,7 @@ from scanpy import AnnData as _AnnData
 import numpy as _np
 from numpy.typing import NDArray
 from scipy.sparse import csr_matrix as _csr_matrix
-from scipy.spatial import distance_matrix as _distance_matrix
+from scipy.spatial import cKDTree as _cKDTree  # to construct sparse distance matrix
 from .classifier import _LocalClassifier
 from .utils import radial_basis_function as _rbf
 from .utils import to_array as _to_array
@@ -44,6 +44,7 @@ class _SpatialHandlerBase:
         threshold_adjacent: float = 1.2,
         max_spots_per_cell: int = 81,
         scale_rbf: float = 1.0,
+        max_distance: float = 40.0,
         allow_cell_overlap: bool = True,
     ):
         # Make sure the indices are integer-ized.
@@ -57,6 +58,7 @@ class _SpatialHandlerBase:
 
         self.max_spots_per_cell = max_spots_per_cell
         self.scale_rbf = scale_rbf
+        self.max_distance = max_distance
         self.allow_cell_overlap: bool = allow_cell_overlap
 
         self._filtrations: dict[int, list[int]] = dict()
@@ -170,8 +172,16 @@ class _SpatialHandlerBase:
 
     def _compute_distance_matrix(self):
         points = self.adata_spatial.obs[["x", "y"]].values
-        self.cache_distance_matrix = _distance_matrix(points, points)
-        # TODO: here we can define a sparse version of
+        ckdtree_points = _cKDTree(points)
+        self.cache_distance_matrix = _csr_matrix(
+            ckdtree_points.sparse_distance_matrix(
+                other=ckdtree_points,
+                max_distance=self.max_distance,
+                p=2,
+                output_type="coo_matrix",
+            )
+        )
+        # Here we can define a sparse version of
         # _distance_matrix for saving memory.
 
         return
@@ -180,9 +190,14 @@ class _SpatialHandlerBase:
         """Find all adjacent spots, including self."""
         if self.cache_distance_matrix is _UNDEFINED:
             self._compute_distance_matrix()
-        assert type(self.cache_distance_matrix) is _np.ndarray
-        distances = self.cache_distance_matrix[idx_this_spot, :]
-        idxs_adjacent = _np.where(distances <= self.threshold_adjacent)[0]
+        assert isinstance(self.cache_distance_matrix, _csr_matrix)
+        distances = self.cache_distance_matrix[idx_this_spot, :].toarray()
+        idxs_adjacent = _np.where(
+            (0 < distances) * (distances <= self.threshold_adjacent)
+        )[0]
+        idxs_adjacent = _np.array(
+            [idx_this_spot] + list(idxs_adjacent)
+        )  # including self
         return idxs_adjacent
 
     def _find_adjacentOfManySpots_spotIds(
@@ -514,7 +529,8 @@ class SpatialHandler(_SpatialHandlerBase):
         threshold_adjacent: float = 1.2,
         max_spots_per_cell: int = 81,
         scale_rbf: float = 1.0,
-        threshold_delta_n_features: int = 10,
+        max_distance: float = 40.0,
+        threshold_delta_n_features: int = 100_000,
         allow_cell_overlap: bool = True,
     ) -> None:
         super().__init__(
@@ -523,6 +539,7 @@ class SpatialHandler(_SpatialHandlerBase):
             threshold_adjacent=threshold_adjacent,
             max_spots_per_cell=max_spots_per_cell,
             scale_rbf=scale_rbf,
+            max_distance: float = 40.0,
             allow_cell_overlap=allow_cell_overlap,
         )
         self.threshold_delta_n_features: int = threshold_delta_n_features
@@ -853,6 +870,7 @@ class SpatialHandlerParallel(SpatialHandler):
         the process of building a filtration (adding spots to it) would not
         stop until the stepwise change in n_features is less than
         `threshold_delta_n_features`.
+        !! Bug exists. For now set to 100_000.
 
         n_parallel (int): build `n_parallel` filtrations parallelly through a
         vector-broadcasting mechanism.
@@ -863,10 +881,11 @@ class SpatialHandlerParallel(SpatialHandler):
         adata_spatial: _AnnData,
         local_classifier: _LocalClassifier,
         threshold_adjacent: float = 1.2,
-        max_spots_per_cell: int = 81,
-        scale_rbf: float = 1.0,
-        threshold_delta_n_features: int = 10,
-        n_parallel: int = 50,
+        max_spots_per_cell: int = 500,
+        scale_rbf: float = 20.0,
+        max_distance: float = 40.0,
+        threshold_delta_n_features: int = 100_000,
+        n_parallel: int = 10000,
     ):
         super().__init__(
             adata_spatial=adata_spatial,
@@ -874,6 +893,7 @@ class SpatialHandlerParallel(SpatialHandler):
             threshold_adjacent=threshold_adjacent,
             max_spots_per_cell=max_spots_per_cell,
             scale_rbf=scale_rbf,
+            max_distance: float = 40.0,
             threshold_delta_n_features=threshold_delta_n_features,
             allow_cell_overlap=True,
         )

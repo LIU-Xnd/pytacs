@@ -557,7 +557,7 @@ class SpatialHandler(_SpatialHandlerBase):
 --- --- --- --- --- ---
 """
 
-    def _firstRound_preMapping(self) -> None:
+    def _firstRound_preMapping(self, n_parallel: int = 1000) -> None:
         """Updates .obsm['confidence_premapping1'].
 
         After the first round mapping, each spot has a confidence.
@@ -572,13 +572,23 @@ class SpatialHandler(_SpatialHandlerBase):
         # We do not want spots to be predicted as class -1
         threshold_confidence_old: float = self.threshold_confidence
         self.local_classifier.set_threshold_confidence(0.0)
-        confidence_premapping: NDArray[_np.float_] = (
-            self.local_classifier.predict_proba(
-                X=_to_array(self.adata_spatial.X), genes=self.adata_spatial.var.index
-            )
+        confidence_premapping: NDArray[_np.float_] = _np.zeros(
+            shape=(self.adata_spatial.shape[0], len(self.local_classifier.classes)),
         )
-        if self.has_negative_control:
-            confidence_premapping = confidence_premapping[:, :-1]
+        for i_batch in tqdm(
+            range(confidence_premapping.shape[0] // n_parallel + 1),
+            desc="1st premapping",
+        ):
+            i_samples = _np.arange(
+                i_batch * n_parallel,
+                min((i_batch + 1) * n_parallel, self.adata_spatial.shape[0]),
+            )
+            if len(i_samples) == 0:
+                continue
+            confidence_premapping[i_samples, :] = self.local_classifier.predict_proba(
+                X=_to_array(self.adata_spatial.X[[i_samples], :]),
+                genes=self.adata_spatial.var.index,
+            )[0, : confidence_premapping.shape[1]]
             # only preserves real classes (ids).
         self.adata_spatial.obsm["confidence_premapping1"] = confidence_premapping
 
@@ -605,7 +615,7 @@ class SpatialHandler(_SpatialHandlerBase):
             "confidence_premapping1"
         ].copy()
 
-        for i_spot in tqdm(range(self.adata_spatial.shape[0])):
+        for i_spot in tqdm(range(self.adata_spatial.shape[0]), desc="2nd premapping"):
             # Get adjacent neighbors
             ixs_adj: NDArray[_np.int_] = super()._find_adjacentOfOneSpot_spotIds(i_spot)
             # Exlucding self
@@ -771,16 +781,10 @@ class SpatialHandler(_SpatialHandlerBase):
 
         return (confidence, label, idx_centroid)
 
-    def run_preMapping(self, verbose: bool = True) -> None:
-        if verbose:
-            tqdm.write("Running first round premapping ...")
-        self._firstRound_preMapping()
-        if verbose:
-            tqdm.write("Running second round premapping ...")
+    def run_preMapping(self, n_parallel: int = 1000) -> None:
+        self._firstRound_preMapping(n_parallel=n_parallel)
         self._secondRound_preMapping()
         self._premapped = True
-        if verbose:
-            tqdm.write("Done.")
         return
 
     # Overwrite
@@ -951,7 +955,9 @@ class SpatialHandlerParallel(SpatialHandler):
                 _to_array(self.adata_spatial.X[[idx], :])[0, :],
             )
         where_running = _np.arange(len(labels))  # Running terms
-        for i_step_add_spot in range(self.max_spots_per_cell):
+        for i_step_add_spot in tqdm(
+            range(self.max_spots_per_cell), desc="Building a batch of cells"
+        ):
             probas = self._compute_confidence_of_filtration(
                 idx_centroids[where_running]
             )
@@ -1019,6 +1025,10 @@ class SpatialHandlerParallel(SpatialHandler):
         )
 
     # Overwrite
+    def run_preMapping(self):
+        return super().run_preMapping(n_parallel=self.n_parallel)
+
+    # Overwrite
     def run_segmentation(
         self,
         n_spots_add_per_step: int = 1,
@@ -1035,7 +1045,7 @@ class SpatialHandlerParallel(SpatialHandler):
         confident_count = 0
         class_count: dict[int, int] = dict()
         queried_spotIds = set()
-        for i_iter in tqdm(range(max_iter)):
+        for i_iter in range(max_iter):
             if verbose and i_iter % 5 == 0:
                 tqdm.write(f"Iter {i_iter+1}:")
             available_spots: list[int] = list(

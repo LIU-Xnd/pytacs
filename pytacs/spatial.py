@@ -895,10 +895,10 @@ class SpatialHandlerParallel(SpatialHandler):
             dtype=dtype,
         )
         for i_idx, idx in enumerate(idx_centroids):
-            self.cache_aggregated_counts[idx] = self.cache_aggregated_counts.get(
-                idx,
-                _to_array(self.adata_spatial.X[[idx], :])[0, :],
-            )
+            if idx not in self.cache_aggregated_counts.keys():
+                self.cache_aggregated_counts[idx] = _to_array(
+                    self.adata_spatial.X[[idx], :]
+                )[0, :]
             result[i_idx, :] = self.cache_aggregated_counts[idx]
         return result
 
@@ -912,7 +912,8 @@ class SpatialHandlerParallel(SpatialHandler):
         Return an idx-by-class 2d-array."""
         # Collect filtrations
         for idx in idx_centroids:
-            self._filtrations[idx] = self._filtrations.get(idx, [idx])
+            if idx not in self._filtrations.keys():
+                self._filtrations[idx] = [idx]
         probas: NDArray[_np.float_] = self.local_classifier.predict_proba(
             X=self._aggregate_spots_given_filtration(idx_centroids),
             genes=self.adata_spatial.var.index,
@@ -948,12 +949,13 @@ class SpatialHandlerParallel(SpatialHandler):
         )
         # Collect filtrations
         for idx in idx_centroids:
-            self._filtrations[idx] = self._filtrations.get(idx, [idx])
+            if idx not in self._filtrations.keys():
+                self._filtrations[idx] = [idx]
         for i_idx, idx in enumerate(idx_centroids):
-            self.cache_aggregated_counts[idx] = self.cache_aggregated_counts.get(
-                idx,
-                _to_array(self.adata_spatial.X[[idx], :])[0, :],
-            )
+            if idx not in self.cache_aggregated_counts.keys():
+                self.cache_aggregated_counts[idx] = _to_array(
+                    self.adata_spatial.X[[idx], :]
+                )[0, :]
         where_running = _np.arange(len(labels))  # Running terms
         for i_step_add_spot in tqdm(
             range(self.max_spots_per_cell), desc="Building a batch of cells"

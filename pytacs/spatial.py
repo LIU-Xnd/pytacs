@@ -588,7 +588,9 @@ class SpatialHandler(_SpatialHandlerBase):
             confidence_premapping[i_samples, :] = self.local_classifier.predict_proba(
                 X=_to_array(self.adata_spatial.X[i_samples, :]),
                 genes=self.adata_spatial.var.index,
-            )[:, : confidence_premapping.shape[1]]
+            )
+        if self.has_negative_control:
+            confidence_premapping = confidence_premapping[:, :-1]
             # only preserves real classes (ids).
         self.adata_spatial.obsm["confidence_premapping1"] = confidence_premapping
 
@@ -658,12 +660,12 @@ class SpatialHandler(_SpatialHandlerBase):
         loc_centroid: _np.ndarray = self.adata_spatial.obs[["x", "y"]].values[
             idx_centroid, :
         ]
-        self._filtrations[idx_centroid] = self._filtrations.get(
-            idx_centroid, [idx_centroid]
-        )
-        self.cache_aggregated_counts[idx_centroid] = self.cache_aggregated_counts.get(
-            idx_centroid, _to_array(self.adata_spatial.X[[idx_centroid], :])[0, :]
-        )
+        if idx_centroid not in self._filtrations:
+            self._filtrations[idx_centroid] = [idx_centroid]
+        if idx_centroid not in self.cache_aggregated_counts:
+            self.cache_aggregated_counts[idx_centroid] = _to_array(
+                self.adata_spatial.X[[idx_centroid], :]
+            )[0, :]
 
         # Stop if max_spots_per_cell reached
         if len(self._filtrations[idx_centroid]) >= self.max_spots_per_cell:
@@ -895,7 +897,7 @@ class SpatialHandlerParallel(SpatialHandler):
             dtype=dtype,
         )
         for i_idx, idx in enumerate(idx_centroids):
-            if idx not in self.cache_aggregated_counts.keys():
+            if idx not in self.cache_aggregated_counts:
                 self.cache_aggregated_counts[idx] = _to_array(
                     self.adata_spatial.X[[idx], :]
                 )[0, :]
@@ -948,11 +950,13 @@ class SpatialHandlerParallel(SpatialHandler):
             dtype=float,
         )
         # Collect filtrations
-        for idx in idx_centroids:
-            if idx not in self._filtrations.keys():
+        for idx in tqdm(idx_centroids, desc="Init filtrations", leave=False):
+            if idx not in self._filtrations:
                 self._filtrations[idx] = [idx]
-        for i_idx, idx in enumerate(idx_centroids):
-            if idx not in self.cache_aggregated_counts.keys():
+        for i_idx, idx in tqdm(
+            enumerate(idx_centroids), desc="Init aggregated counts cache", leave=False
+        ):
+            if idx not in self.cache_aggregated_counts:
                 self.cache_aggregated_counts[idx] = _to_array(
                     self.adata_spatial.X[[idx], :]
                 )[0, :]
@@ -969,9 +973,15 @@ class SpatialHandlerParallel(SpatialHandler):
             self.adata_spatial.obs.loc[
                 idx_centroids[where_running].astype(str), "cell_type_premapping2"
             ] = labels[where_running]
-            confidences[where_running] = probas[_np.arange(len(where_running)), labels]
+            confidences[where_running] = probas[
+                _np.arange(len(where_running)), labels[where_running]
+            ]
             where_to_drop = []
-            for i_idx, confidence in enumerate(confidences[where_running]):
+            for i_idx, confidence in tqdm(
+                enumerate(confidences[where_running]),
+                desc="Processing one of the cell",
+                leave=False,
+            ):
                 idx: int = idx_centroids[where_running][i_idx]
                 if confidence >= self.threshold_confidence:
                     self._mask_newIds[_np.array(self.filtrations[idx])] = idx
@@ -981,7 +991,9 @@ class SpatialHandlerParallel(SpatialHandler):
                     where_to_drop.append(i_idx)
                     continue
                 # Add n spots
-                for i_add in range(n_spots_add_per_step):
+                for i_add in tqdm(
+                    range(n_spots_add_per_step), desc="Adding spots", leave=False
+                ):
                     idx_added = self._buildFiltration_addOneSpot(
                         idx,
                         verbose,
@@ -1025,10 +1037,6 @@ class SpatialHandlerParallel(SpatialHandler):
             labels,
             idx_centroids,
         )
-
-    # Overwrite
-    def run_preMapping(self):
-        return super().run_preMapping(n_parallel=self.n_parallel)
 
     # Overwrite
     def run_segmentation(

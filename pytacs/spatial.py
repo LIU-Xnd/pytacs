@@ -950,40 +950,59 @@ class SpatialHandlerParallel(SpatialHandler):
                 idx,
                 _to_array(self.adata_spatial.X[[idx], :])[0, :],
             )
-
+        where_running = _np.arange(len(labels))  # Running terms
         for i_step_add_spot in range(self.max_spots_per_cell):
-            probas = self._compute_confidence_of_filtration(idx_centroids)
-            labels = _np.argmax(probas, axis=1)
+            probas = self._compute_confidence_of_filtration(
+                idx_centroids[where_running]
+            )
+            labels[where_running] = _np.argmax(probas, axis=1)
 
             # Dynamically changes premapped cell-type
             self.adata_spatial.obs.loc[
-                _np.array(idx_centroids).astype(str), "cell_type_premapping2"
-            ] = labels
-            confidences = probas[_np.arange(len(idx_centroids)), labels]
-            for i_idx, confidence in enumerate(confidences):
-                idx: int = idx_centroids[i_idx]
+                idx_centroids[where_running].astype(str), "cell_type_premapping2"
+            ] = labels[where_running]
+            confidences[where_running] = probas[_np.arange(len(where_running)), labels]
+            where_to_drop = []
+            for i_idx, confidence in enumerate(confidences[where_running]):
+                idx: int = idx_centroids[where_running][i_idx]
                 if confidence >= self.threshold_confidence:
                     self._mask_newIds[_np.array(self.filtrations[idx])] = idx
-                    self._classes_new[idx] = labels[i_idx]
+                    self._classes_new[idx] = labels[where_running][i_idx]
                     self._confidences_new[idx] = confidence
-                    # TODO: mark confident and drop
-                    break
+                    # Mark confident and drop
+                    where_to_drop.append(i_idx)
+                    continue
                 # Add n spots
                 for i_add in range(n_spots_add_per_step):
                     idx_added = self._buildFiltration_addOneSpot(
                         idx,
                         verbose,
                     )
-                    if idx_added == -1:  # exhausted #TODO: mark unconfident and drop
+                    if idx_added == -1:  # exhausted
+                        # Final test and mark unconfident and drop
+                        proba_ = self._compute_confidence_of_filtration(
+                            _np.array([idx])
+                        )[0, :]
+                        label_ = _np.argmax(proba_)
+                        conf_ = proba_[label_]
+                        confidences[where_running][i_idx] = conf_
+                        if conf_ >= self.threshold_confidence:
+                            labels[where_running][i_idx] = label_
+                            self._mask_newIds[_np.array(self.filtrations[idx])] = idx
+                            self._classes_new[idx] = label_
+                            self._confidences_new[idx] = conf_
+                        else:
+                            labels[where_running][i_idx] = -1
+                        # Drop this
+                        where_to_drop.append(i_idx)
                         break
-                continue
+            # Update running indices
+            where_running = _np.array(list(set(where_running) - set(where_to_drop)))
             # Stop criteria
-            if _np.all(confidences > self.threshold_confidence):
+            if len(where_running) == 0:
                 break
-
         else:  # reaches max_spots
             labels[confidences < self.threshold_confidence] = -1
-            # BUG: after n_features converges, some confidence might be unconfident again! Drop this feature for now.
         # Clear unconfident caches
         for i_idx, label in enumerate(labels):
             idx = idx_centroids[i_idx]

@@ -586,9 +586,9 @@ class SpatialHandler(_SpatialHandlerBase):
             if len(i_samples) == 0:
                 continue
             confidence_premapping[i_samples, :] = self.local_classifier.predict_proba(
-                X=_to_array(self.adata_spatial.X[[i_samples], :]),
+                X=_to_array(self.adata_spatial.X[i_samples, :]),
                 genes=self.adata_spatial.var.index,
-            )[0, : confidence_premapping.shape[1]]
+            )[:, : confidence_premapping.shape[1]]
             # only preserves real classes (ids).
         self.adata_spatial.obsm["confidence_premapping1"] = confidence_premapping
 

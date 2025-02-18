@@ -539,7 +539,7 @@ class SpatialHandler(_SpatialHandlerBase):
             threshold_adjacent=threshold_adjacent,
             max_spots_per_cell=max_spots_per_cell,
             scale_rbf=scale_rbf,
-            max_distance: float = 40.0,
+            max_distance=max_distance,
             allow_cell_overlap=allow_cell_overlap,
         )
         self.threshold_delta_n_features: int = threshold_delta_n_features
@@ -893,7 +893,7 @@ class SpatialHandlerParallel(SpatialHandler):
             threshold_adjacent=threshold_adjacent,
             max_spots_per_cell=max_spots_per_cell,
             scale_rbf=scale_rbf,
-            max_distance: float = 40.0,
+            max_distance=max_distance,
             threshold_delta_n_features=threshold_delta_n_features,
             allow_cell_overlap=True,
         )

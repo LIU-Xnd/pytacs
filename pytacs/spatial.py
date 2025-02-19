@@ -2,6 +2,7 @@ from scanpy import AnnData as _AnnData
 import numpy as _np
 from numpy.typing import NDArray
 from scipy.sparse import csr_matrix as _csr_matrix
+from scipy.sparse import dok_matrix as _dok_matrix  # for cache_aggregated_counts
 from scipy.spatial import cKDTree as _cKDTree  # to construct sparse distance matrix
 from .classifier import _LocalClassifier
 from .utils import radial_basis_function as _rbf
@@ -85,8 +86,8 @@ class _SpatialHandlerBase:
         self._confidences_new: dict[int, float] = dict()
         # new id -> confidence
 
-        self.cache_distance_matrix: NDArray[_np.float_] | _Undefined = _UNDEFINED
-        self.cache_aggregated_counts: dict[int, NDArray[_np.int_]] = dict()
+        self.cache_distance_matrix: _dok_matrix | _Undefined = _UNDEFINED
+        self.cache_aggregated_counts: _dok_matrix = _dok_matrix(adata_spatial.X).copy()
         self.cache_singleCellAnnData: _AnnData | _Undefined = _UNDEFINED
         return
 
@@ -167,19 +168,17 @@ class _SpatialHandlerBase:
     def clear_cache(self) -> None:
         self.cache_distance_matrix = _UNDEFINED
         self.cache_singleCellAnnData = _UNDEFINED
-        self.cache_aggregated_counts = dict()
+        self.cache_aggregated_counts = _dok_matrix(self.adata_spatial.X).copy()
         return
 
     def _compute_distance_matrix(self):
         points = self.adata_spatial.obs[["x", "y"]].values
         ckdtree_points = _cKDTree(points)
-        self.cache_distance_matrix = _csr_matrix(
-            ckdtree_points.sparse_distance_matrix(
-                other=ckdtree_points,
-                max_distance=self.max_distance,
-                p=2,
-                output_type="coo_matrix",
-            )
+        self.cache_distance_matrix = ckdtree_points.sparse_distance_matrix(
+            other=ckdtree_points,
+            max_distance=self.max_distance,
+            p=2,
+            output_type="dok_matrix",
         )
         # Here we can define a sparse version of
         # _distance_matrix for saving memory.
@@ -190,7 +189,7 @@ class _SpatialHandlerBase:
         """Find all adjacent spots, including self."""
         if self.cache_distance_matrix is _UNDEFINED:
             self._compute_distance_matrix()
-        assert isinstance(self.cache_distance_matrix, _csr_matrix)
+        assert isinstance(self.cache_distance_matrix, _dok_matrix)
         distances = self.cache_distance_matrix[[idx_this_spot], :].toarray()[0, :]
         idxs_adjacent = _np.where(
             (0 < distances) * (distances <= self.threshold_adjacent)
@@ -263,12 +262,9 @@ class _SpatialHandlerBase:
         # Update the filtration
         self._filtrations[idx_centroid].append(idx_selected)
         # Update the aggregated counts cache
-        self.cache_aggregated_counts[idx_centroid] = self.cache_aggregated_counts.get(
-            idx_centroid, _to_array(self.adata_spatial.X[[idx_centroid], :])[0, :]
-        )
-        self.cache_aggregated_counts[idx_centroid] += _to_array(
-            self.adata_spatial.X[[idx_selected], :]
-        )[0, :]
+        self.cache_aggregated_counts[idx_centroid, :] += self.adata_spatial.X[
+            idx_selected, :
+        ]
 
         return idx_selected
 
@@ -279,10 +275,7 @@ class _SpatialHandlerBase:
         """Returns a 1d-array of counts of genes.
         Load from cache.
         """
-        self.cache_aggregated_counts[idx_centroid] = self.cache_aggregated_counts.get(
-            idx_centroid, _to_array(self.adata_spatial.X[[idx_centroid], :])[0, :]
-        )
-        return self.cache_aggregated_counts[idx_centroid]
+        return self.cache_aggregated_counts[[idx_centroid], :].toarray()[0, :]
 
     def _compute_confidence_of_filtration(
         self,
@@ -290,13 +283,10 @@ class _SpatialHandlerBase:
     ) -> NDArray[_np.float_]:
         """Calculate confidences of filtrations[idx_centroid] to each class,
         EXCLUDING the nagetive control, if exists."""
-        self._filtrations[idx_centroid] = self._filtrations.get(
-            idx_centroid, [idx_centroid]
-        )
+        if idx_centroid not in self._filtrations:
+            self._filtrations[idx_centroid] = [idx_centroid]
         probas = self.local_classifier.predict_proba(
-            X=_np.array(
-                [list(self._aggregate_spots_given_filtration(idx_centroid))]
-            ),  # TODO: Here could be parallelized.
+            X=self.cache_aggregated_counts[[idx_centroid], :].toarray(),
             genes=self.adata_spatial.var.index,
         )[0, :]
         # Remove the NegativeControl proba
@@ -347,10 +337,9 @@ class _SpatialHandlerBase:
             del self._filtrations[idx_centroid]
         # Clear aggregated counts cache once their confidences are determined,
         # whether positive or not.
-        try:
-            del self.cache_aggregated_counts[idx_centroid]
-        except KeyError as kerr:
-            pass  # Key not existing is allowed.
+        self.cache_aggregated_counts[idx_centroid, :] = self.adata_spatial.X[
+            idx_centroid, :
+        ].copy()
         return (confidence, label, idx_centroid)
 
     # Need to be careful with input idx_centroid - you don't want to
@@ -623,7 +612,7 @@ class SpatialHandler(_SpatialHandlerBase):
         ):
             # Get adjacent neighbors
             ixs_adj: NDArray[_np.int_] = super()._find_adjacentOfOneSpot_spotIds(i_spot)
-            # Exlucding self
+            # Excluding self
             ixs_adj = _np.array(list(set(ixs_adj) - {i_spot}))
             if len(ixs_adj) == 0:  # if no neighbors, skip
                 continue
@@ -665,10 +654,6 @@ class SpatialHandler(_SpatialHandlerBase):
         ]
         if idx_centroid not in self._filtrations:
             self._filtrations[idx_centroid] = [idx_centroid]
-        if idx_centroid not in self.cache_aggregated_counts:
-            self.cache_aggregated_counts[idx_centroid] = _to_array(
-                self.adata_spatial.X[[idx_centroid], :]
-            )[0, :]
 
         # Stop if max_spots_per_cell reached
         if len(self._filtrations[idx_centroid]) >= self.max_spots_per_cell:
@@ -713,9 +698,10 @@ class SpatialHandler(_SpatialHandlerBase):
         # Update the filtration
         self._filtrations[idx_centroid].append(idx_selected)
         # Update the aggregated counts cache
-        self.cache_aggregated_counts[idx_centroid] += _to_array(
-            self.adata_spatial.X[[idx_selected], :]
-        )[0, :]
+        self.cache_aggregated_counts[idx_centroid, :] += self.adata_spatial.X[
+            idx_selected, :
+        ]
+
         return idx_selected
 
     def _buildFiltration_addSpotsUntilConfident(
@@ -735,9 +721,8 @@ class SpatialHandler(_SpatialHandlerBase):
         label: int = -1  # cell type assigned, -1 for not confident
         confidence: float = 0.0
         # Collect filtrations
-        self._filtrations[idx_centroid] = self._filtrations.get(
-            idx_centroid, [idx_centroid]
-        )
+        if idx_centroid not in self._filtrations:
+            self._filtrations[idx_centroid] = [idx_centroid]
         for _ in range(self.max_spots_per_cell):
             probas = self._compute_confidence_of_filtration(idx_centroid)
             label = int(_np.argmax(probas))
@@ -782,7 +767,9 @@ class SpatialHandler(_SpatialHandlerBase):
             del self._filtrations[idx_centroid]
         # Clear aggregated counts cache once their confidences are determined,
         # whether positive or not.
-        del self.cache_aggregated_counts[idx_centroid]
+        self.cache_aggregated_counts[idx_centroid, :] = self.adata_spatial.X[
+            idx_centroid, :
+        ].copy()
 
         return (confidence, label, idx_centroid)
 
@@ -889,25 +876,6 @@ class SpatialHandlerParallel(SpatialHandler):
 """
 
     # Overwrite
-    def _aggregate_spots_given_filtration(
-        self,
-        idx_centroids: NDArray[_np.int_],
-    ) -> NDArray[_np.int_ | _np.float_]:
-        """Returns a 2d-array of counts of genes (idx-by-gene). Load from cache."""
-        dtype = self.adata_spatial.X.dtype
-        result: _np.ndarray = _np.zeros(
-            shape=(len(idx_centroids), self.adata_spatial.shape[1]),
-            dtype=dtype,
-        )
-        for i_idx, idx in enumerate(idx_centroids):
-            if idx not in self.cache_aggregated_counts:
-                self.cache_aggregated_counts[idx] = _to_array(
-                    self.adata_spatial.X[[idx], :]
-                )[0, :]
-            result[i_idx, :] = self.cache_aggregated_counts[idx]
-        return result
-
-    # Overwrite
     def _compute_confidence_of_filtration(
         self,
         idx_centroids: NDArray[_np.int_],
@@ -920,7 +888,7 @@ class SpatialHandlerParallel(SpatialHandler):
             if idx not in self._filtrations:
                 self._filtrations[idx] = [idx]
         probas: NDArray[_np.float_] = self.local_classifier.predict_proba(
-            X=self._aggregate_spots_given_filtration(idx_centroids),
+            X=self.cache_aggregated_counts[idx_centroids, :].toarray(),
             genes=self.adata_spatial.var.index,
         )
         # Only keeps positive classes
@@ -953,24 +921,10 @@ class SpatialHandlerParallel(SpatialHandler):
             dtype=float,
         )
         # Collect filtrations
-        for idx in tqdm(
-            idx_centroids,
-            desc="Init filtrations",
-            leave=False,
-            ncols=60,
-        ):
+        for idx in idx_centroids:
             if idx not in self._filtrations:
                 self._filtrations[idx] = [idx]
-        for idx in tqdm(
-            idx_centroids,
-            desc="Init aggregated counts cache",
-            leave=False,
-            ncols=60,
-        ):
-            if idx not in self.cache_aggregated_counts:
-                self.cache_aggregated_counts[idx] = _to_array(
-                    self.adata_spatial.X[[idx], :]
-                )[0, :]
+
         where_running = _np.arange(len(labels))  # Running terms
         for i_step_add_spot in tqdm(
             range(self.max_spots_per_cell),
@@ -990,12 +944,7 @@ class SpatialHandlerParallel(SpatialHandler):
                 _np.arange(len(where_running)), labels[where_running]
             ]
             where_to_drop = []
-            for i_idx, confidence in tqdm(
-                enumerate(confidences[where_running]),
-                desc="Processing one of the cell",
-                leave=False,
-                ncols=60,
-            ):
+            for i_idx, confidence in enumerate(confidences[where_running]):
                 idx: int = idx_centroids[where_running][i_idx]
                 if confidence >= self.threshold_confidence:
                     self._mask_newIds[_np.array(self.filtrations[idx])] = idx
@@ -1005,12 +954,7 @@ class SpatialHandlerParallel(SpatialHandler):
                     where_to_drop.append(i_idx)
                     continue
                 # Add n spots
-                for i_add in tqdm(
-                    range(n_spots_add_per_step),
-                    desc="Adding spots",
-                    leave=False,
-                    ncols=60,
-                ):
+                for i_add in range(n_spots_add_per_step):
                     idx_added = self._buildFiltration_addOneSpot(
                         idx,
                         verbose,
@@ -1047,7 +991,7 @@ class SpatialHandlerParallel(SpatialHandler):
                 del self._filtrations[idx]
             # Clear aggregated counts cache once their confidences are determined,
             # whether positive or not.
-            del self.cache_aggregated_counts[idx]
+            self.cache_aggregated_counts[idx, :] = self.adata_spatial.X[idx, :].copy()
 
         return (
             confidences,

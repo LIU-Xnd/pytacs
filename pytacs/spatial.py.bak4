@@ -8,7 +8,6 @@ from .classifier import _LocalClassifier
 from .utils import radial_basis_function as _rbf
 from .utils import to_array as _to_array
 from .utils import _UNDEFINED, _Undefined
-from multiprocess.pool import Pool as _Pool
 from tqdm import tqdm
 
 
@@ -876,32 +875,129 @@ class SpatialHandlerParallel(SpatialHandler):
 --- --- --- --- --- ---
 """
 
-    def worker(
+    # Overwrite
+    def _compute_confidence_of_filtration(
         self,
-        idx_centroid: int,
-        n_spots_add_per_step: int = 50,
-        verbose: bool = True,
-    ) -> dict:
-        """Worker for multiprocess. Return a meta-dictionary of
-        {idx_centroid: info_dictionary}, with info-dictionary of
-        keys: confident, label, filtration. Note that in pool,
-        each worker is independent, and the instance input to each is copied, not the original one, so this SpatialHandlerParallel instance's status will not
-        change."""
-        # Prepare filtrations
-        if idx_centroid not in self._filtrations:
-            self._filtrations[idx_centroid] = [idx_centroid]
-        conf, label, _ = self._buildFiltration_addSpotsUntilConfident(
-            idx_centroid=idx_centroid,
-            n_spots_add_per_step=n_spots_add_per_step,
-            verbose=verbose,
+        idx_centroids: NDArray[_np.int_],
+    ) -> NDArray[_np.float_]:
+        """Calculate confidences of filtrations to each class,
+        EXCLUDING the negative control, if exists.
+        Return an idx-by-class 2d-array."""
+        # Collect filtrations
+        for idx in idx_centroids:
+            if idx not in self._filtrations:
+                self._filtrations[idx] = [idx]
+        probas: NDArray[_np.float_] = self.local_classifier.predict_proba(
+            X=self.cache_aggregated_counts[idx_centroids, :].toarray(),
+            genes=self.adata_spatial.var.index,
         )
-        return {
-            idx_centroid: {
-                "confidence": conf,
-                "label": label,
-                "filtration": self._filtrations[idx_centroid],
-            }
-        }
+        # Only keeps positive classes
+        if self.has_negative_control:
+            probas = probas[:-1]
+        return probas
+
+    def _buildFiltration_addSpotsUntilConfident(
+        self,
+        idx_centroids: NDArray[_np.int_],
+        n_spots_add_per_step: int = 1,
+        verbose: bool = True,
+    ) -> tuple[NDArray[_np.float_], NDArray[_np.int_], NDArray[_np.int_]]:
+        """Find many spots centered at idx_centroids that are confidently in a class.
+
+        Update the self.filtrations, update the self.mask_newIds, self.confidences_new,
+         self.classes_new,
+         and returns the (confidences, class_ids, new_sampleIds).
+        Keeps building until max_spots_per_cell met.
+        If reaches max_spots_per_cell and still not confident, that class_id is set to -1.
+        """
+        labels: NDArray[_np.int_] = _np.full(
+            shape=len(idx_centroids),
+            fill_value=-1,
+            dtype=int,
+        )  # cell types assigned, -1 for not confident
+        confidences: NDArray[_np.float_] = _np.full(
+            shape=len(idx_centroids),
+            fill_value=0.0,
+            dtype=float,
+        )
+        # Collect filtrations
+        for idx in idx_centroids:
+            if idx not in self._filtrations:
+                self._filtrations[idx] = [idx]
+
+        where_running = _np.arange(len(labels))  # Running terms
+        for i_step_add_spot in tqdm(
+            range(self.max_spots_per_cell),
+            desc="Building a batch of cells",
+            ncols=60,
+        ):
+            probas = self._compute_confidence_of_filtration(
+                idx_centroids[where_running]
+            )
+            labels[where_running] = _np.argmax(probas, axis=1)
+
+            # Dynamically changes premapped cell-type
+            self.adata_spatial.obs.loc[
+                idx_centroids[where_running].astype(str), "cell_type_premapping2"
+            ] = labels[where_running]
+            confidences[where_running] = probas[
+                _np.arange(len(where_running)), labels[where_running]
+            ]
+            where_to_drop = []
+            for i_idx, confidence in enumerate(confidences[where_running]):
+                idx: int = idx_centroids[where_running][i_idx]
+                if confidence >= self.threshold_confidence:
+                    self._mask_newIds[_np.array(self.filtrations[idx])] = idx
+                    self._classes_new[idx] = labels[where_running][i_idx]
+                    self._confidences_new[idx] = confidence
+                    # Mark confident and drop
+                    where_to_drop.append(i_idx)
+                    continue
+                # Add n spots
+                for i_add in range(n_spots_add_per_step):
+                    idx_added = self._buildFiltration_addOneSpot(
+                        idx,
+                        verbose,
+                    )
+                    if idx_added == -1:  # exhausted
+                        # Final test and mark unconfident and drop
+                        proba_ = self._compute_confidence_of_filtration(
+                            _np.array([idx])
+                        )[0, :]
+                        label_ = _np.argmax(proba_)
+                        conf_ = proba_[label_]
+                        confidences[where_running][i_idx] = conf_
+                        if conf_ >= self.threshold_confidence:
+                            labels[where_running][i_idx] = label_
+                            self._mask_newIds[_np.array(self.filtrations[idx])] = idx
+                            self._classes_new[idx] = label_
+                            self._confidences_new[idx] = conf_
+                        else:
+                            labels[where_running][i_idx] = -1
+                        # Drop this
+                        where_to_drop.append(i_idx)
+                        break
+            # Update running indices
+            where_running = _np.array(list(set(where_running) - set(where_to_drop)))
+            # Stop criteria
+            if len(where_running) == 0:
+                break
+        else:  # reaches max_spots
+            labels[confidences < self.threshold_confidence] = -1
+        # Clear unconfident caches
+        for i_idx, label in enumerate(labels):
+            idx = idx_centroids[i_idx]
+            if label == -1:
+                del self._filtrations[idx]
+            # Clear aggregated counts cache once their confidences are determined,
+            # whether positive or not.
+            self.cache_aggregated_counts[idx, :] = self.adata_spatial.X[idx, :].copy()
+
+        return (
+            confidences,
+            labels,
+            idx_centroids,
+        )
 
     # Overwrite
     def run_segmentation(
@@ -921,6 +1017,8 @@ class SpatialHandlerParallel(SpatialHandler):
         class_count: dict[int, int] = dict()
         queried_spotIds = set()
         for i_iter in range(max_iter):
+            if verbose and i_iter % 5 == 0:
+                tqdm.write(f"Iter {i_iter+1}:")
             available_spots: list[int] = list(
                 set(self.unmasked_spotIds) - queried_spotIds
             )
@@ -933,26 +1031,23 @@ class SpatialHandlerParallel(SpatialHandler):
                 replace=False,
             )
             queried_spotIds |= set(idx_centroids)
-            with _Pool(self.n_parallel) as pool:
-                # Note that in pool, states of this obj are not changed.
-                res = pool.map(
-                    lambda idx: self.worker(
-                        idx_centroid=idx,
-                        n_spots_add_per_step=n_spots_add_per_step,
-                        verbose=verbose,
-                    ),
-                    idx_centroids,
-                )
-            for idx, info in res.items():
-                if info["label"] == -1:
+            if verbose and i_iter % 5 == 0:
+                tqdm.write(f"Querying {len(idx_centroids)} spots ...")
+            confs, labels, _ = self._buildFiltration_addSpotsUntilConfident(
+                idx_centroids=idx_centroids,
+                n_spots_add_per_step=n_spots_add_per_step,
+                verbose=warnings,
+            )
+            confident_count += (confs >= self.threshold_confidence).sum()
+            for label in labels:
+                if label == -1:
                     continue
-                self._filtrations[idx] = info["filtrations"]
-                self._mask_newIds[_np.array(self._filtrations[idx])] = idx
-                self._classes_new[idx] = label
-                self._confidences_new[idx] = info["confidence"]
-                confident_count += 1
-                class_count[info["label"]] = class_count.get(info["label"], 0) + 1
-
+                class_count[label] = class_count.get(label, 0) + 1
+            if verbose and i_iter % 5 == 0:
+                tqdm.write(
+                    f"Cell {idx_centroids[0]}, ... | Confidence: {confs[0]:.3e}, ... | Confident total: {confident_count} | class: {labels[0]}, ..."
+                )
+                tqdm.write(f"Classes total: {class_count}")
             coverage = (self.mask_newIds > -1).sum() / len(self.mask_newIds)
             if verbose and i_iter % 5 == 0:
                 tqdm.write(f"Coverage: {coverage*100:.2f}%")

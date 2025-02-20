@@ -102,7 +102,7 @@ def save_and_tidy_index(
         print(
             f"Warning: {colname_to_save_oldIndex} already in obs! New name: {colname_to_save_oldIndex}_copy."
         )
-        colname_to_save_oldIndex += '_copy'
+        colname_to_save_oldIndex += "_copy"
     adata.obs[colname_to_save_oldIndex] = adata.obs.index
     adata.obs.index = _np.arange(adata.obs.shape[0]).astype(str)
     return None
@@ -120,8 +120,7 @@ def radial_basis_function(
     if centroid_vector is None:
         centroid_vector = _np.zeros((location_vector.shape[0],))
     return (
-        1 / _np.power(2 * _np.pi * _np.power(scale, 2),
-                      location_vector.shape[0] / 2)
+        1 / _np.power(2 * _np.pi * _np.power(scale, 2), location_vector.shape[0] / 2)
     ) * _np.exp(
         -_np.power(_np.linalg.norm(location_vector - centroid_vector), 2)
         / (2 * _np.power(scale, 2))
@@ -136,3 +135,7 @@ def to_array(X: _np.ndarray | _csr_matrix) -> _np.ndarray:
         return X.toarray()
     assert isinstance(X, _np.ndarray)
     return X
+
+
+def deepcopy_dict(d: dict[int, list]) -> dict:
+    return {k: v.copy() for k, v in d.items()}

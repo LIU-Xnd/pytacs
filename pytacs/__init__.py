@@ -45,8 +45,8 @@
 #  needs addressing in the future.
 # - Write __repr__ for _LocalClassifier and its child classes.
 
-__version__ = "1.1.4"
+__version__ = "1.2.0"
 
 from .data import AnnDataPreparer
 from .classifier import SVM, GaussianNaiveBayes, QProximityClassifier
-from .spatial import SpatialHandler, SpatialHandlerParallel
+from .spatial import SpatialHandler, run_segmentation_parallel

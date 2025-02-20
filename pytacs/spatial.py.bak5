@@ -10,7 +10,6 @@ from .utils import to_array as _to_array
 from .utils import _UNDEFINED, _Undefined
 from multiprocess.pool import Pool as _Pool
 from tqdm import tqdm
-from .utils import deepcopy_dict as _deepcopy_dict
 
 
 class _SpatialHandlerBase:
@@ -89,9 +88,7 @@ class _SpatialHandlerBase:
         # new id -> confidence
 
         self.cache_distance_matrix: _dok_matrix | _Undefined = _UNDEFINED
-        self.cache_aggregated_counts: _dok_matrix = _dok_matrix(
-            self.adata_spatial.shape, dtype=int
-        )
+        self.cache_aggregated_counts: _dok_matrix = _dok_matrix(adata_spatial.X).copy()
         self.cache_singleCellAnnData: _AnnData | _Undefined = _UNDEFINED
         return
 
@@ -172,7 +169,7 @@ class _SpatialHandlerBase:
     def clear_cache(self) -> None:
         self.cache_distance_matrix = _UNDEFINED
         self.cache_singleCellAnnData = _UNDEFINED
-        self.cache_aggregated_counts = _dok_matrix(self.adata_spatial.shape, dtype=int)
+        self.cache_aggregated_counts = _dok_matrix(self.adata_spatial.X).copy()
         return
 
     def _compute_distance_matrix(self):
@@ -233,11 +230,9 @@ class _SpatialHandlerBase:
         Update the self.filtrations, self.cache_aggregated_counts,
          and returns the added spot index (-1 for not added)."""
         loc_centroid = self.adata_spatial.obs[["x", "y"]].values[idx_centroid, :]
-        if idx_centroid not in self._filtrations:
-            self._filtrations[idx_centroid] = [idx_centroid]
-            self.cache_aggregated_counts[idx_centroid, :] = self.adata_spatial.X[
-                idx_centroid, :
-            ].copy()
+        self._filtrations[idx_centroid] = self._filtrations.get(
+            idx_centroid, [idx_centroid]
+        )
         if len(self._filtrations[idx_centroid]) >= self.max_spots_per_cell:
             if verbose:
                 tqdm.write(
@@ -291,9 +286,6 @@ class _SpatialHandlerBase:
         EXCLUDING the nagetive control, if exists."""
         if idx_centroid not in self._filtrations:
             self._filtrations[idx_centroid] = [idx_centroid]
-            self.cache_aggregated_counts[idx_centroid, :] = self.adata_spatial.X[
-                idx_centroid, :
-            ].copy()
         probas = self.local_classifier.predict_proba(
             X=self.cache_aggregated_counts[[idx_centroid], :].toarray(),
             genes=self.adata_spatial.var.index,
@@ -346,7 +338,9 @@ class _SpatialHandlerBase:
             del self._filtrations[idx_centroid]
         # Clear aggregated counts cache once their confidences are determined,
         # whether positive or not.
-        self.cache_aggregated_counts[idx_centroid, :] = 0
+        self.cache_aggregated_counts[idx_centroid, :] = self.adata_spatial.X[
+            idx_centroid, :
+        ].copy()
         return (confidence, label, idx_centroid)
 
     # Need to be careful with input idx_centroid - you don't want to
@@ -661,9 +655,6 @@ class SpatialHandler(_SpatialHandlerBase):
         ]
         if idx_centroid not in self._filtrations:
             self._filtrations[idx_centroid] = [idx_centroid]
-            self.cache_aggregated_counts[idx_centroid, :] = self.adata_spatial.X[
-                idx_centroid, :
-            ].copy()
 
         # Stop if max_spots_per_cell reached
         if len(self._filtrations[idx_centroid]) >= self.max_spots_per_cell:
@@ -730,7 +721,9 @@ class SpatialHandler(_SpatialHandlerBase):
          (confidence, -1, and idx_centroid)."""
         label: int = -1  # cell type assigned, -1 for not confident
         confidence: float = 0.0
-
+        # Collect filtrations
+        if idx_centroid not in self._filtrations:
+            self._filtrations[idx_centroid] = [idx_centroid]
         for _ in range(self.max_spots_per_cell):
             probas = self._compute_confidence_of_filtration(idx_centroid)
             label = int(_np.argmax(probas))
@@ -775,7 +768,9 @@ class SpatialHandler(_SpatialHandlerBase):
             del self._filtrations[idx_centroid]
         # Clear aggregated counts cache once their confidences are determined,
         # whether positive or not.
-        self.cache_aggregated_counts[idx_centroid, :] = 0
+        self.cache_aggregated_counts[idx_centroid, :] = self.adata_spatial.X[
+            idx_centroid, :
+        ].copy()
 
         return (confidence, label, idx_centroid)
 
@@ -804,128 +799,6 @@ class SpatialHandler(_SpatialHandlerBase):
             warnings,
             print_summary,
         )
-
-
-# class _FrozenSpatialHandler(SpatialHandler):
-#     """Create a deep copy of spatial handler."""
-
-#     def __init__(
-#         self,
-#         sph: SpatialHandler,
-#     ):
-#         self.adata_spatial = sph.adata_spatial
-#         self.local_classifier = sph.local_classifier
-#         self.threshold_adjacent = sph.threshold_adjacent
-#         self.max_spots_per_cell = sph.max_spots_per_cell
-#         self.scale_rbf = sph.scale_rbf
-#         self.max_distance = sph.max_distance
-#         self.allow_cell_overlap = sph.allow_cell_overlap
-
-#         self._filtrations = _deepcopy_dict(sph._filtrations)
-#         self._mask_newIds = sph._mask_newIds.copy()
-#         self._classes_new = sph._classes_new.copy()
-#         self._confidences_new = sph._confidences_new.copy()
-#         self.cache_distance_matrix = sph.cache_distance_matrix.copy()
-#         self.cache_aggregated_counts = sph.cache_aggregated_counts.copy()
-#         self.cache_singleCellAnnData = sph.cache_singleCellAnnData.copy()
-#         return
-
-
-# def _worker(
-#     sph: _FrozenSpatialHandler,
-#     idx: int,
-#     n_spots_add_per_step: int,
-#     verbose: bool,
-# ) -> tuple[_FrozenSpatialHandler, float, int, int]:
-#     """Return (sph, conf, label, idx)"""
-#     conf, label, _ = sph._buildFiltration_addSpotsUntilConfident(
-#         idx_centroid=idx,
-#         n_spots_add_per_step=n_spots_add_per_step,
-#         verbose=verbose,
-#     )
-#     return (sph, conf, label, idx)
-
-
-# def run_segmentation_parallel(
-#     sph: SpatialHandler,
-#     n_spots_add_per_step: int = 5,
-#     coverage_to_stop: float = 0.99,
-#     n_parallel: int = 20,
-#     max_iter: int = 20,
-#     print_summary: bool = True,
-#     verbose: bool = True,
-#     warnings: bool = False,
-# ) -> None:
-#     """Segments the spots into single cells and maps their cell types,
-#     in a parallel manner.
-#     Updates the sph's filtrations, sampleIds_new, classes_new, confidences_new."""
-#     assert sph.allow_cell_overlap
-#     assert sph._premapped, "Must .run_preMapping() first!"
-#     sph_frozen = _FrozenSpatialHandler(sph)
-#     confident_count = 0
-#     class_count: dict[int, int] = dict()
-#     queried_spotIds = set()
-#     for i_iter in range(max_iter):
-#         available_spots = list(set(sph.unmasked_spotIds) - queried_spotIds)
-#         if len(available_spots) == 0:
-#             print("All spots queried.")
-#         idx_centroids = _np.random.choice(
-#             a=available_spots,
-#             size=min(n_parallel, len(available_spots)),
-#             replace=False,
-#         )
-#         queried_spotIds |= set(idx_centroids)
-#         # Build filtrations parallely
-#         with _Pool(n_parallel) as pool:
-#             if verbose:
-#                 print(f"Allocating {len(idx_centroids)} jobs")
-#             copies_sph_frozen = [
-#                 _FrozenSpatialHandler(sph_frozen) for _ in range(len(idx_centroids))
-#             ]
-#             results = pool.map(
-#                 func=lambda params: _worker(
-#                     sph=params[0],
-#                     idx=params[1],
-#                     n_spots_add_per_step=n_spots_add_per_step,
-#                     verbose=verbose,
-#                 ),
-#                 iterable=zip(copies_sph_frozen, idx_centroids),
-#             )
-#         for res in results:
-#             res_label = res[2]
-#             if res_label == -1:
-#                 continue
-#             res_sph = res[0]
-#             res_conf = res[1]
-#             res_idx = res[3]
-
-#             sph._filtrations[res_idx] = res_sph._filtrations[res_idx].copy()
-#             sph._mask_newIds[_np.array(sph._filtrations[res_idx])] = res_idx
-#             sph._classes_new[res_idx] = res_label
-#             sph._confidences_new[res_idx] = res_conf
-#             confident_count += 1
-#             class_count[res_label] = class_count.get(res_label, 0) + 1
-
-#         coverage = (sph.mask_newIds > -1).sum() / len(sph.mask_newIds)
-#         if verbose:
-#             print(f"Coverage: {coverage*100:.2f}%")
-#         if coverage >= coverage_to_stop:
-#             break
-#     else:
-#         if warnings:
-#             print(f"Reaches max_iter {max_iter}!")
-#     if verbose:
-#         print("Done.")
-#     if print_summary:
-#         print(
-#             f"""--- Summary ---
-# Queried {len(queried_spotIds)} spots, of which {confident_count} made up confident single cells.
-# Classes total: {class_count}
-# Coverage: {coverage*100:.2f}%
-# --- --- --- --- ---
-# """
-#         )
-#         return
 
 
 class SpatialHandlerParallel(SpatialHandler):
@@ -967,9 +840,10 @@ class SpatialHandlerParallel(SpatialHandler):
         adata_spatial: _AnnData,
         local_classifier: _LocalClassifier,
         threshold_adjacent: float = 1.2,
-        max_spots_per_cell: int = 60,
+        max_spots_per_cell: int = 500,
         scale_rbf: float = 20.0,
-        max_distance: float = 10.0,
+        max_distance: float = 40.0,
+        n_parallel: int = 10000,
     ):
         super().__init__(
             adata_spatial=adata_spatial,
@@ -980,6 +854,7 @@ class SpatialHandlerParallel(SpatialHandler):
             max_distance=max_distance,
             allow_cell_overlap=True,
         )
+        self.n_parallel: int = n_parallel
         return
 
     # Overwrite
@@ -993,6 +868,7 @@ class SpatialHandlerParallel(SpatialHandler):
 - max_spots_per_cell: {self.max_spots_per_cell}
 - scale_rbf: {self.scale_rbf}
 - pre-mapped: {self._premapped}
+- n_parallel: {self.n_parallel}
 - filtrations: {len(self.filtrations)} fitted
 - single-cell segmentation:
     + new samples: {len(self.sampleIds_new)}
@@ -1000,134 +876,40 @@ class SpatialHandlerParallel(SpatialHandler):
 --- --- --- --- --- ---
 """
 
-    # Overwrite
-    def _compute_confidence_of_filtration(
+    def worker(
         self,
-        idx_centroids: NDArray[_np.int_],
-    ) -> NDArray[_np.float_]:
-        """Calculate confidences of filtrations to each class,
-        EXCLUDING the negative control, if exists.
-        Return an idx-by-class 2d-array."""
-        # Collect filtrations
-        for idx in idx_centroids:
-            if idx not in self._filtrations:
-                self._filtrations[idx] = [idx]
-                self.cache_aggregated_counts[idx, :] = self.adata_spatial.X[
-                    idx, :
-                ].copy()
-        probas: NDArray[_np.float_] = self.local_classifier.predict_proba(
-            X=self.cache_aggregated_counts[idx_centroids, :].toarray(),
-            genes=self.adata_spatial.var.index,
-        )
-        # Only keeps positive classes
-        if self.has_negative_control:
-            probas = probas[:-1]
-        return probas
-
-    def _buildFiltration_addSpotsUntilConfident(
-        self,
-        idx_centroids: NDArray[_np.int_],
-        n_spots_add_per_step: int = 1,
+        idx_centroid: int,
+        n_spots_add_per_step: int = 50,
         verbose: bool = True,
-    ) -> tuple[NDArray[_np.float_], NDArray[_np.int_], NDArray[_np.int_]]:
-        """Find many spots centered at idx_centroids that are confidently in a class.
+    ) -> dict:
+        """Worker for multiprocess. Return a meta-dictionary of
+        {idx_centroid: info_dictionary}, with info-dictionary of
+        keys: confident, label, filtration. Note that in pool,
+        each worker is independent, and the instance input to each is copied, not the original one, so this SpatialHandlerParallel instance's status will not
+        change."""
 
-        Update the self.filtrations, update the self.mask_newIds, self.confidences_new,
-         self.classes_new,
-         and returns the (confidences, class_ids, new_sampleIds).
-        Keeps building until max_spots_per_cell met.
-        If reaches max_spots_per_cell and still not confident, that class_id is set to -1.
-        """
-        labels: NDArray[_np.int_] = _np.full(
-            shape=len(idx_centroids),
-            fill_value=-1,
-            dtype=int,
-        )  # cell types assigned, -1 for not confident
-        confidences: NDArray[_np.float_] = _np.full(
-            shape=len(idx_centroids),
-            fill_value=0.0,
-            dtype=float,
+        # Prepare filtrations
+        if idx_centroid not in self._filtrations:
+            self._filtrations[idx_centroid] = [idx_centroid]
+        conf, label, _ = self._buildFiltration_addSpotsUntilConfident(
+            idx_centroid=idx_centroid,
+            n_spots_add_per_step=n_spots_add_per_step,
+            verbose=False,
         )
-
-        where_running = _np.arange(len(labels))  # Running terms
-        for i_step_add_spot in tqdm(
-            range(self.max_spots_per_cell),
-            desc="Building a batch of cells",
-            ncols=60,
-        ):
-            probas = self._compute_confidence_of_filtration(
-                idx_centroids[where_running]
-            )
-            labels[where_running] = _np.argmax(probas, axis=1)
-
-            # Dynamically changes premapped cell-type
-            self.adata_spatial.obs.loc[
-                idx_centroids[where_running].astype(str), "cell_type_premapping2"
-            ] = labels[where_running]
-            confidences[where_running] = probas[
-                _np.arange(len(where_running)), labels[where_running]
-            ]
-            where_to_drop = []
-            for i_idx, confidence in enumerate(confidences[where_running]):
-                idx: int = idx_centroids[where_running][i_idx]
-                if confidence >= self.threshold_confidence:
-                    self._mask_newIds[_np.array(self.filtrations[idx])] = idx
-                    self._classes_new[idx] = labels[where_running][i_idx]
-                    self._confidences_new[idx] = confidence
-                    # Mark confident and drop
-                    where_to_drop.append(i_idx)
-                    continue
-                # Add n spots
-                for i_add in range(n_spots_add_per_step):
-                    idx_added = self._buildFiltration_addOneSpot(
-                        idx,
-                        verbose,
-                    )
-                    if idx_added == -1:  # exhausted
-                        # Final test and mark unconfident and drop
-                        proba_ = self._compute_confidence_of_filtration(
-                            _np.array([idx])
-                        )[0, :]
-                        label_ = _np.argmax(proba_)
-                        conf_ = proba_[label_]
-                        confidences[where_running][i_idx] = conf_
-                        if conf_ >= self.threshold_confidence:
-                            labels[where_running][i_idx] = label_
-                            self._mask_newIds[_np.array(self.filtrations[idx])] = idx
-                            self._classes_new[idx] = label_
-                            self._confidences_new[idx] = conf_
-                        else:
-                            labels[where_running][i_idx] = -1
-                        # Drop this
-                        where_to_drop.append(i_idx)
-                        break
-            # Update running indices
-            where_running = _np.array(list(set(where_running) - set(where_to_drop)))
-            # Stop criteria
-            if len(where_running) == 0:
-                break
-        else:  # reaches max_spots
-            labels[confidences < self.threshold_confidence] = -1
-        # Clear unconfident caches
-        for i_idx, label in enumerate(labels):
-            idx = idx_centroids[i_idx]
-            if label == -1:
-                del self._filtrations[idx]
-            # Clear aggregated counts cache once their confidences are determined,
-            # whether positive or not.
-            self.cache_aggregated_counts[idx, :] = 0
-
-        return (
-            confidences,
-            labels,
-            idx_centroids,
-        )
+        if verbose:
+            print(f"Worker {idx_centroid} is done.\n", end="", flush=True)
+        return {
+            idx_centroid: {
+                "confidence": conf,
+                "label": label,
+                "filtration": self._filtrations[idx_centroid],
+            }
+        }
 
     # Overwrite
     def run_segmentation(
         self,
-        n_spots_add_per_step: int = 9,
-        n_parallel: int = 100,
+        n_spots_add_per_step: int = 1,
         coverage_to_stop: float = 0.8,
         max_iter: int = 200,
         verbose: bool = True,
@@ -1142,49 +924,53 @@ class SpatialHandlerParallel(SpatialHandler):
         class_count: dict[int, int] = dict()
         queried_spotIds = set()
         for i_iter in range(max_iter):
-            if verbose and i_iter % 5 == 0:
-                tqdm.write(f"Iter {i_iter+1}:")
             available_spots: list[int] = list(
                 set(self.unmasked_spotIds) - queried_spotIds
             )
             if len(available_spots) == 0:
-                tqdm.write("All spots queried.")
+                print("All spots queried.")
                 break
             idx_centroids: NDArray[_np.int_] = _np.random.choice(
                 a=available_spots,
-                size=min(n_parallel, len(available_spots)),
+                size=min(self.n_parallel, len(available_spots)),
                 replace=False,
             )
             queried_spotIds |= set(idx_centroids)
-            if verbose and i_iter % 5 == 0:
-                tqdm.write(f"Querying {len(idx_centroids)} spots ...")
-            confs, labels, _ = self._buildFiltration_addSpotsUntilConfident(
-                idx_centroids=idx_centroids,
-                n_spots_add_per_step=n_spots_add_per_step,
-                verbose=warnings,
-            )
-            confident_count += (confs >= self.threshold_confidence).sum()
-            for label in labels:
-                if label == -1:
-                    continue
-                class_count[label] = class_count.get(label, 0) + 1
-            if verbose and i_iter % 5 == 0:
-                tqdm.write(
-                    f"Cell {idx_centroids[0]}, ... | Confidence: {confs[0]:.3e}, ... | Confident total: {confident_count} | class: {labels[0]}, ..."
+            if verbose:
+                print(f"{len(idx_centroids)} workers are on.\n", end="", flush=True)
+            with _Pool(self.n_parallel) as pool:
+                # Note that in pool, states of this obj are not changed.
+                res = pool.map(
+                    lambda idx: self.worker(
+                        idx_centroid=idx,
+                        n_spots_add_per_step=n_spots_add_per_step,
+                        verbose=verbose,
+                    ),
+                    idx_centroids,
                 )
-                tqdm.write(f"Classes total: {class_count}")
+            for res_ in res:
+                idx, info = list(res_.items())[0]
+                if info["label"] == -1:
+                    continue
+                self._filtrations[idx] = info["filtrations"]
+                self._mask_newIds[_np.array(self._filtrations[idx])] = idx
+                self._classes_new[idx] = info["label"]
+                self._confidences_new[idx] = info["confidence"]
+                confident_count += 1
+                class_count[info["label"]] = class_count.get(info["label"], 0) + 1
+
             coverage = (self.mask_newIds > -1).sum() / len(self.mask_newIds)
             if verbose and i_iter % 5 == 0:
-                tqdm.write(f"Coverage: {coverage*100:.2f}%")
+                print(f"Coverage: {coverage*100:.2f}%")
             if coverage >= coverage_to_stop:
                 break
         else:
             if warnings:
-                tqdm.write(f"Reaches max_iter {max_iter}!")
+                print(f"Reaches max_iter {max_iter}!")
         if verbose:
-            tqdm.write("Done.")
+            print("Done.")
         if print_summary:
-            tqdm.write(
+            print(
                 f"""--- Summary ---
 Queried {len(queried_spotIds)} spots, of which {confident_count} made up confident single cells.
 Classes total: {class_count}

@@ -8,9 +8,11 @@ from .classifier import _LocalClassifier
 from .utils import radial_basis_function as _rbf
 from .utils import to_array as _to_array
 from .utils import _UNDEFINED, _Undefined
-from multiprocess.pool import Pool as _Pool
+
+# from multiprocess.pool import Pool as _Pool
 from tqdm import tqdm
-from .utils import deepcopy_dict as _deepcopy_dict
+
+# from .utils import deepcopy_dict as _deepcopy_dict
 
 
 class _SpatialHandlerBase:
@@ -1051,7 +1053,7 @@ class SpatialHandlerParallel(SpatialHandler):
 
         where_running = _np.arange(len(labels))  # Running terms
         for i_step_add_spot in tqdm(
-            range(self.max_spots_per_cell),
+            range(self.max_spots_per_cell // n_spots_add_per_step + 1),
             desc="Building a batch of cells",
             ncols=60,
         ):

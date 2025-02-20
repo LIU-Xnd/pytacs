@@ -49,4 +49,4 @@ __version__ = "1.2.0"
 
 from .data import AnnDataPreparer
 from .classifier import SVM, GaussianNaiveBayes, QProximityClassifier
-from .spatial import SpatialHandler, run_segmentation_parallel
+from .spatial import SpatialHandler, SpatialHandlerParallel  # run_segmentation_parallel

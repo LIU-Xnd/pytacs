@@ -1144,7 +1144,7 @@ class SpatialHandlerParallel(SpatialHandler):
         class_count: dict[int, int] = dict()
         queried_spotIds = set()
         for i_iter in range(max_iter):
-            if verbose and i_iter % 5 == 0:
+            if verbose:
                 tqdm.write(f"Iter {i_iter+1}:")
             available_spots: list[int] = list(
                 set(self.unmasked_spotIds) - queried_spotIds
@@ -1158,8 +1158,6 @@ class SpatialHandlerParallel(SpatialHandler):
                 replace=False,
             )
             queried_spotIds |= set(idx_centroids)
-            if verbose and i_iter % 5 == 0:
-                tqdm.write(f"Querying {len(idx_centroids)} spots ...")
             confs, labels, _ = self._buildFiltration_addSpotsUntilConfident(
                 idx_centroids=idx_centroids,
                 n_spots_add_per_step=n_spots_add_per_step,
@@ -1170,13 +1168,13 @@ class SpatialHandlerParallel(SpatialHandler):
                 if label == -1:
                     continue
                 class_count[label] = class_count.get(label, 0) + 1
-            if verbose and i_iter % 5 == 0:
+            if verbose:
                 tqdm.write(
                     f"Cell {idx_centroids[0]}, ... | Confidence: {confs[0]:.3e}, ... | Confident total: {confident_count} | class: {labels[0]}, ..."
                 )
                 tqdm.write(f"Classes total: {class_count}")
             coverage = (self.mask_newIds > -1).sum() / len(self.mask_newIds)
-            if verbose and i_iter % 5 == 0:
+            if verbose:
                 tqdm.write(f"Coverage: {coverage*100:.2f}%")
             if coverage >= coverage_to_stop:
                 break

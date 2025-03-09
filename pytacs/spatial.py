@@ -7,7 +7,7 @@ from scipy.spatial import cKDTree as _cKDTree  # to construct sparse distance ma
 from .classifier import _LocalClassifier
 from .utils import radial_basis_function as _rbf
 from .utils import to_array as _to_array
-from .utils import _UNDEFINED, _Undefined
+from .utils import _UNDEFINED, _UndefinedType
 
 # from multiprocess.pool import Pool as _Pool
 from tqdm import tqdm
@@ -90,11 +90,11 @@ class _SpatialHandlerBase:
         self._confidences_new: dict[int, float] = dict()
         # new id -> confidence
 
-        self.cache_distance_matrix: _dok_matrix | _Undefined = _UNDEFINED
+        self.cache_distance_matrix: _dok_matrix | _UndefinedType = _UNDEFINED
         self.cache_aggregated_counts: _dok_matrix = _dok_matrix(
             self.adata_spatial.shape, dtype=int
         )
-        self.cache_singleCellAnnData: _AnnData | _Undefined = _UNDEFINED
+        self.cache_singleCellAnnData: _AnnData | _UndefinedType = _UNDEFINED
         return
 
     @property
@@ -1108,8 +1108,7 @@ class SpatialHandlerParallel(SpatialHandler):
             # Stop criteria
             if len(where_running) == 0:
                 break
-        else:  # reaches max_spots
-            labels[confidences < self.threshold_confidence] = -1
+        labels[confidences < self.threshold_confidence] = -1
         # Clear unconfident caches
         for i_idx, label in enumerate(labels):
             idx = idx_centroids[i_idx]

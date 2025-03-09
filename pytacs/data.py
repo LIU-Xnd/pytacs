@@ -1,11 +1,11 @@
 from scanpy import AnnData as _AnnData
 
-# import scanpy as _sc
+import scanpy as _sc
 import pandas as _pd
 import numpy as _np
 from scipy.sparse import csr_matrix as _csr_matrix
 from .utils import save_and_tidy_index as _save_and_tidy_index
-from .utils import _UNDEFINED, _Undefined
+from .utils import _UNDEFINED, _UndefinedType
 
 
 class AnnDataPreparer:
@@ -29,7 +29,6 @@ class AnnDataPreparer:
 - sn_adata: {self.sn_adata}
 - sp_adata: {self.sp_adata}
 - sn_adata_withNegativeControl: {self.__sn_adata_withNegativeControl}
-- normalized: {self.__normalized}
 --- --- --- --- ---
 """
 
@@ -55,8 +54,8 @@ class AnnDataPreparer:
         """
         # Checklist
         assert isinstance(sn_adata, _AnnData) or isinstance(sp_adata, _AnnData)
-        sn_adata_copy: _AnnData | _Undefined = _UNDEFINED
-        sp_adata_copy: _AnnData | _Undefined = _UNDEFINED
+        sn_adata_copy: _AnnData | _UndefinedType = _UNDEFINED
+        sp_adata_copy: _AnnData | _UndefinedType = _UNDEFINED
         if sn_adata is not None:
             sn_adata_copy = sn_adata.copy()
         if sp_adata is not None:
@@ -102,17 +101,16 @@ class AnnDataPreparer:
 
         if isinstance(sn_adata, _AnnData) and isinstance(sp_adata, _AnnData):
             self.sn_adata: _AnnData = sn_adata_copy[:, overlapped_genes].copy()
+            # only keeps overlapped genes for sn_adata
+            # sp_adata remains untouched
         else:
             self.sn_adata: _AnnData = sn_adata_copy
         self.sp_adata: _AnnData = sp_adata_copy
-        self.__sn_adata_withNegativeControl: _AnnData | _Undefined = _UNDEFINED
-        self.__normalized: bool = False
-        return None
+        self.__sn_adata_withNegativeControl: _AnnData | _UndefinedType = _UNDEFINED
+        return
 
     @property
     def sn_adata_withNegativeControl(self) -> _AnnData:
-        # if self.__sn_adata_withNegativeControl is _UNDEFINED:
-        #     self.simulate_negative_control()
         return self.__sn_adata_withNegativeControl
 
     def simulate_negative_control(
@@ -188,18 +186,33 @@ class AnnDataPreparer:
             self.__sn_adata_withNegativeControl = sn_adata_withNegativeControl
         return sn_adata_withNegativeControl
 
-    def normalize(self, force: bool = False):
-        """Normalize all count matrices by rows."""
-        # v1.0.0 - normalization has bugs. Do not use it for now.
-        print("v1.0.0 - normalization has bugs. Do not use it for now! Skip.")
-        return
-        # if self.__normalized and not force:
-        #     print("Normalization has already been done before! Skip.")
-        #     return None
-        # _sc.pp.normalize_total(self.sn_adata, target_sum=1e4)
-        # _sc.pp.normalize_total(self.sp_adata, target_sum=1e4)
-        # if self.__sn_adata_withNegativeControl is not _UNDEFINED:
-        #     _sc.pp.normalize_total(
-        #         self.sn_adata_withNegativeControl, target_sum=1e4)
-        # self.__normalized = True
-        # return None
+    def filter_genes_highly_variable(
+        self,
+        min_counts: int = 3,
+        n_top_genes: int = 3000,
+    ) -> None:
+        """Filter on genes of sn_adata, keeping only highly variable genes.
+        First back up raw counts into layers['counts'],
+        then filter genes, normalize, logarithmize, and find highly variable genes.
+        Finally saves this expression matrix into layers['log1p'] and activate back raw counts,
+        and only keeps highly variable genes.
+        For more preprocessing please use scanpy directly."""
+        self.sn_adata.layers["counts"] = self.sn_adata.X.copy()
+        _sc.pp.filter_genes(
+            data=self.sn_adata,
+            min_counts=min_counts,
+            inplace=True,
+        )
+        _sc.pp.normalize_total(
+            adata=self.sn_adata,
+            target_sum=1e4,
+            inplace=True,
+        )
+        _sc.pp.log1p(self.sn_adata)
+        _sc.pp.highly_variable_genes(
+            adata=self.sn_adata,
+            n_top_genes=n_top_genes,
+            subset=True,
+        )
+        self.sn_adata.layers["log1p"] = self.sn_adata.X.copy()
+        self.sn_adata.X = self.sn_adata.layers["counts"].copy()

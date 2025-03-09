@@ -4,7 +4,7 @@ from scipy.sparse import csr_matrix as _csr_matrix
 
 
 # Placeholder type
-class _Undefined:
+class _UndefinedType:
     def copy(self):
         return self
 
@@ -12,7 +12,7 @@ class _Undefined:
         return "_UNDEFINED"
 
 
-_UNDEFINED = _Undefined()
+_UNDEFINED = _UndefinedType()
 
 
 # >>> --- I/O operations ---
@@ -37,7 +37,7 @@ def extract_ints_from_str(string_: str, sep: str = ",") -> list[int]:
 
 def print_newlines(*args, sep: str = "\n") -> None:
     """Print args one by one, seperated by newline."""
-    print(*args, sep="\n")
+    print(*args, sep=sep)
     return None
 
 

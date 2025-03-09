@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from scipy.stats import norm as _norm
 from scipy.sparse import csr_matrix as _csr_matrix
 from typing import Iterable, Literal
-from .utils import _UNDEFINED, _Undefined
+from .utils import _UNDEFINED, _UndefinedType
 from .utils import subCountMatrix_genes2InGenes1 as _get_subCountMatrix
 
 
@@ -38,8 +38,8 @@ class _LocalClassifier:
     ):
         self._threshold_confidence: float = threshold_confidence
         self._has_negative_control: bool = False
-        self._genes: NDArray[_np.str_] | _Undefined = _UNDEFINED
-        self._classes: NDArray[_np.str_] | _Undefined = _UNDEFINED
+        self._genes: NDArray[_np.str_] | _UndefinedType = _UNDEFINED
+        self._classes: NDArray[_np.str_] | _UndefinedType = _UNDEFINED
         return None
 
     @property
@@ -55,11 +55,11 @@ class _LocalClassifier:
         return self._has_negative_control
 
     @property
-    def genes(self) -> NDArray[_np.str_] | _Undefined:
+    def genes(self) -> NDArray[_np.str_] | _UndefinedType:
         return self._genes.copy()
 
     @property
-    def classes(self) -> NDArray[_np.str_] | _Undefined:
+    def classes(self) -> NDArray[_np.str_] | _UndefinedType:
         return self._classes.copy()
 
     def classId_to_className(self, class_id: int) -> str:
@@ -109,13 +109,16 @@ class _LocalClassifier:
             self (Model): a trained model (self).
         """
         assert _np.all(
-            sn_adata.obs.index.astype(_np.int_) ==\
-                _np.arange(sn_adata.shape[0])
-        ), 'sn_adata needs tidying using AnnDataPreparer!'
+            sn_adata.obs.index.astype(_np.int_) == _np.arange(sn_adata.shape[0])
+        ), "sn_adata needs tidying using AnnDataPreparer!"
         self._genes = _np.array(sn_adata.var.index)
-        self._classes = _np.sort(_np.array(
-            (sn_adata.obs[colname_classes]).unique()
-        ).astype(str))  # sorted alphabetically
+        if self._genes.shape[0] > 10_000:
+            print(
+                f"Warning: genes exceed 10,000, might encounter memory issue. You might want to filter genes first."
+            )
+        self._classes = _np.sort(
+            _np.array((sn_adata.obs[colname_classes]).unique()).astype(str)
+        )  # sorted alphabetically
         # Move the __NegativeControl label to the end
         if "__NegativeControl" in self._classes:
             self._has_negative_control = True
@@ -171,8 +174,7 @@ class _LocalClassifier:
         else:
             assert isinstance(genes, Iterable)
             genes_ = list(genes)
-        assert len(
-            genes_) == X.shape[1], "genes must be compatible with X.shape[1]"
+        assert len(genes_) == X.shape[1], "genes must be compatible with X.shape[1]"
         # Select those genes that appear in self._genes
         X_new = _get_subCountMatrix(X, list(self._genes), genes_)
         # print(f"{X_new.shape=}")
@@ -273,7 +275,7 @@ class SVM(_LocalClassifier):
         self._model = _CalibratedClassifierCV(_model)
         self._normalize: bool = normalize
         self._log1p: bool = log1p
-        self._PC_loadings: NDArray | _Undefined = _UNDEFINED
+        self._PC_loadings: NDArray | _UndefinedType = _UNDEFINED
         self._n_PCs: int = n_PCs if on_PCs else 0
         self._on_PCs: bool = on_PCs
         return super().__init__(threshold_confidence=threshold_confidence)
@@ -306,8 +308,9 @@ class SVM(_LocalClassifier):
         )
         X_ready: NDArray = X_y_ready["X"]
         if self._normalize:
-            X_ready = 1e4 * \
-                _np.divide(X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8))
+            X_ready = 1e4 * _np.divide(
+                X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8)
+            )
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
@@ -339,10 +342,11 @@ class SVM(_LocalClassifier):
             2darray[float]: probs of falling into each class;
              each row is a sample and each column is a class."""
 
-        X_ready: NDArray = super().predict_proba(X, genes)['X']
+        X_ready: NDArray = super().predict_proba(X, genes)["X"]
         if self._normalize:
-            X_ready = 1e4 * \
-                _np.divide(X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8))
+            X_ready = 1e4 * _np.divide(
+                X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8)
+            )
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
@@ -433,7 +437,7 @@ class GaussianNaiveBayes(_LocalClassifier):
         self._model = _GaussianNB(**kwargs)
         self._normalize: bool = normalize
         self._log1p: bool = log1p
-        self._PC_loadings: NDArray | _Undefined = _UNDEFINED
+        self._PC_loadings: NDArray | _UndefinedType = _UNDEFINED
         self._n_PCs: int = n_PCs if on_PCs else 0
         self._on_PCs: bool = on_PCs
         self._prob_mode: str = prob_mode
@@ -471,8 +475,9 @@ class GaussianNaiveBayes(_LocalClassifier):
         )
         X_ready: NDArray = X_y_ready["X"]
         if self._normalize:
-            X_ready = 1e4 * \
-                _np.divide(X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8))
+            X_ready = 1e4 * _np.divide(
+                X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8)
+            )
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
@@ -503,8 +508,9 @@ class GaussianNaiveBayes(_LocalClassifier):
              each row is a sample and each column is a class."""
         X_ready: NDArray = super().predict_proba(X, genes)["X"]
         if self._normalize:
-            X_ready = 1e4 * \
-                _np.divide(X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8))
+            X_ready = 1e4 * _np.divide(
+                X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8)
+            )
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
@@ -514,8 +520,7 @@ class GaussianNaiveBayes(_LocalClassifier):
         if self._prob_mode == "relative":
             return self._model.predict_proba(X_ready)
         assert isinstance(self._classes, _np.ndarray)
-        tail_probabilities = _np.zeros(
-            shape=(X_ready.shape[0], len(self._classes)))
+        tail_probabilities = _np.zeros(shape=(X_ready.shape[0], len(self._classes)))
         for i, sample in enumerate(X_ready):
             for j, cls_name in enumerate(self._classes):
                 tail_probs = [
@@ -640,13 +645,13 @@ class QProximityClassifier(_LocalClassifier):
 
         self._normalize: bool = normalize
         self._log1p: bool = log1p
-        self._PC_loadings: NDArray | _Undefined = _UNDEFINED
+        self._PC_loadings: NDArray | _UndefinedType = _UNDEFINED
         self._n_PCs: int = n_PCs if on_PCs else 0
         self._on_PCs: bool = on_PCs
         self._standardize_PCs: bool = standardize_PCs and on_PCs
-        
+
         # Saves singular values of SVD transform for standardizing PCs.
-        self._singular_values: NDArray[_np.float_] | _Undefined = _UNDEFINED
+        self._singular_values: NDArray[_np.float_] | _UndefinedType = _UNDEFINED
         self._q: float = q
 
         self._capped: bool = capped
@@ -678,8 +683,9 @@ class QProximityClassifier(_LocalClassifier):
         X_ready: NDArray = X_y_ready["X"]
 
         if self._normalize:
-            X_ready = 1e4 * \
-                _np.divide(X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8))
+            X_ready = 1e4 * _np.divide(
+                X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8)
+            )
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
@@ -700,16 +706,14 @@ class QProximityClassifier(_LocalClassifier):
         assert type(self.classes) is _np.ndarray
         for i_cls, cls_name in enumerate(self.classes):
             # Save the points belonging to this class
-            self._model_points[i_cls] = X_ready[X_y_ready["y"]
-                                                == i_cls, :].copy()
+            self._model_points[i_cls] = X_ready[X_y_ready["y"] == i_cls, :].copy()
             # Find centroid
             n_points: int = self._model_points[i_cls].shape[0]
             mean_vector = self._model_points[i_cls].sum(axis=0) / n_points
             # Calculate distances of points to mean vector
             distances_to_mean = _np.zeros(shape=(n_points,))
             for i_point, point in enumerate(self._model_points[i_cls]):
-                distances_to_mean[i_point] = _np.linalg.norm(
-                    point - mean_vector)
+                distances_to_mean[i_point] = _np.linalg.norm(point - mean_vector)
             # Points from near to far
             ix_from_near_to_far = _np.argsort(distances_to_mean)
             n_points_keep: int = int(_np.round(n_points * self._q))
@@ -736,11 +740,12 @@ class QProximityClassifier(_LocalClassifier):
         Return:
             2darray[float]: probs of falling into each class;
              each row is a sample and each column is a class."""
-        
+
         X_ready: NDArray = super().predict_proba(X, genes)["X"]
         if self._normalize:
-            X_ready = 1e4 * \
-                _np.divide(X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8))
+            X_ready = 1e4 * _np.divide(
+                X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8)
+            )
         if self._log1p:
             X_ready = _np.log1p(X_ready)
         if self._on_PCs:
@@ -790,4 +795,148 @@ class QProximityClassifier(_LocalClassifier):
         Return:
             NDArray[_np.int_]: an array of predicted classIds."""
 
+        return super().predict(X, genes)
+
+
+class CosineSimilarityClassifier(_LocalClassifier):
+    """This classifier would predict probs for each class, EXCLUDING the
+    negative controls.
+
+    Ref samples of counts of each class are normalized,
+    log1p transformed (if specified), and averaged as the ref signatures.
+    Pearson's correlation is used to determined the probs for each sample
+    to be in a class.
+
+    .fit(), .predict(), and .predict_proba() are specially built, but
+    often the last two methods are not to be called manually.
+
+    Predicted integer i indicates the class self._classes[i].
+
+    Args
+    ----------
+    threshold_confidence : float, default=0.75
+        Confidence according to which whether the classifier predicts a sample
+        to be in a class.
+
+    log1p : bool, default=True
+        Whether to compare log1p transformed expression vectors instead of
+        raw counts.
+    """
+
+    def __init__(
+        self,
+        threshold_confidence: float = 0.75,
+        log1p: bool = True,
+    ):
+        super().__init__(threshold_confidence=threshold_confidence)
+        self._log1p = log1p
+        self._model_signatures: _np.ndarray | _UndefinedType = _UNDEFINED
+        return
+
+    def fit(
+        self,
+        sn_adata: _AnnData,
+        colname_classes: str = "cell_type",
+    ) -> dict:
+        """Trains the local classifier using the AnnData format snRNA-seq data.
+
+        Args:
+            sn_adata (AnnData): snRNA-seq h5ad data. Must have attributes:
+             .X, the sample-by-gene count matrix;
+             .obs['cell_type'] or named otherwise, that indicates the label of
+             each sample;
+             .var, whose index indicates the genes used for training.
+
+            colname_classes (str): the name of the column in .obs that
+             indicates the cell types (classes).
+             Negative controls should be named '__NegativeControl' which is the
+             default name of negative controls generated
+             by pytacs.data.AnnDataPreparer.
+
+        Return:
+            self (Model): a trained model (self).
+        """
+        data_ready: dict = super().fit(
+            sn_adata=sn_adata,
+            colname_classes=colname_classes,
+        )
+        assert not self._has_negative_control
+
+        # "Train" the model
+        assert isinstance(self._classes, _np.ndarray)
+        self._model_signatures = _np.zeros(
+            shape=(len(self._classes), len(self._genes)),
+        )
+        for i_cls, cls_name in enumerate(self._classes):
+            # Normalized
+            signature: _np.ndarray = data_ready["X"][data_ready["y"] == i_cls, :]
+            signature = 1e4 * _np.divide(
+                signature,
+                _np.maximum(
+                    1e-8,
+                    _np.sum(signature, axis=1).reshape(-1, 1),
+                ),
+            )
+            if self._log1p:
+                signature = _np.log1p(signature)
+            # Average
+            signature = signature.mean(axis=0)
+            # Standardize
+            signature /= max(1e-8, _np.linalg.norm(signature))
+            self._model_signatures[i_cls, :] = signature
+        return self
+
+    def predict_proba(
+        self,
+        X: NDArray | _csr_matrix,
+        genes: Iterable[str] | None = None,
+    ) -> NDArray[_np.float_]:
+        """Predicts the probabilities for each
+        sample to be of each class.
+
+        Args:
+            X (NDArray | _csr_matrix): input count matrix.
+
+            genes (Iterable[str] | None): list of genes corresponding to
+             X's columns. If None, set to pretrained snRNA-seq's gene list.
+
+        Return:
+            2darray[float]: probs of falling into each class;
+             each row is a sample and each column is a class."""
+        X_ready: _np.ndarray = super().predict_proba(X, genes)["X"]
+        if self._log1p:
+            X_ready = 1e4 * _np.divide(
+                X_ready,
+                _np.maximum(1e-8, _np.sum(X_ready, axis=1).reshape(-1, 1)),
+            )
+            X_ready = _np.log1p(X_ready)
+        # Standardize
+        X_ready = _np.divide(
+            X_ready,
+            _np.maximum(
+                1e-8,
+                _np.linalg.norm(X_ready, axis=1).reshape(-1, 1),
+            ),
+        )
+        corr = _np.maximum(1e-8, X_ready @ self._model_signatures.T)
+        return corr
+
+    def predict(
+        self,
+        X: _np.ndarray,
+        genes: Iterable[str] | None = None,
+    ):
+        """Predicts classes of each sample. For example, if prediction is i,
+         then the predicted class is self.classes[i].
+         For those below confidence threshold,
+         predicted classes are set to -1.
+
+        Args:
+            X (NDArray | _csr_matrix): input count matrix.
+
+            genes (Iterable[str] | None): list of genes corresponding to
+             those of X's columns. If None, set to pretrained gene list.
+
+        Return:
+            NDArray[_np.int_]: an array of predicted classIds."""
         return super().predict(X, genes)

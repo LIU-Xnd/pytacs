@@ -54,4 +54,4 @@ from .classifier import (
     QProximityClassifier,
     CosineSimilarityClassifier,
 )
-from .spatial import SpatialHandler, SpatialHandlerParallel  # run_segmentation_parallel
+from .spatial import SpatialHandler

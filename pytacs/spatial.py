@@ -1,3 +1,4 @@
+from typing import Literal
 from scanpy import AnnData as _AnnData
 import numpy as _np
 from numpy.typing import NDArray
@@ -627,9 +628,20 @@ Coverage: {coverage*100:.2f}%
             self.cache_singleCellAnnData = sc_adata
         return sc_adata
 
-    def get_spatial_classes(self) -> NDArray[_np.int_]:
-        """Get an array of integers, corresponding to class ids of each old sample (spot). -1 for unassigned."""
-        res = _np.zeros(shape=(self.adata_spatial.shape[0],), dtype=int)
+    def get_type_name_by_id(self, index: int) -> str:
+        if index == -1:
+            return "Undefined"
+        return self.local_classifier._classes[index]
+
+    def get_spatial_classes(
+        self,
+        return_string: bool = False,
+    ) -> NDArray[_np.int_] | NDArray[_np.str_]:
+        """Get an array of integers, corresponding to class ids of each old sample (spot). -1 for unassigned. Or if `return_string` is `True`, return an array of
+        class names, and 'Undefined' for unassigned."""
+        res: NDArray[_np.int_] = _np.zeros(
+            shape=(self.adata_spatial.shape[0],), dtype=int
+        )
         for i_sample in range(len(res)):
             # First query the filtrations.keys()
             if i_sample in self._filtrations.keys():
@@ -641,16 +653,23 @@ Coverage: {coverage*100:.2f}%
                 continue
             new_class = self.classes_new[new_id]
             res[i_sample] = new_class
+        if return_string:
+            return _np.array(
+                [self.get_type_name_by_id(id_cls) for id_cls in res], dtype=str
+            )
         return res
 
     def run_plotClasses(self):
+        """Plot classes of each spot. Classes sorted alphabetically."""
         import seaborn as sns
 
-        spatial_classes = self.get_spatial_classes().astype(str)
-        hue_order = _np.sort(_np.unique(spatial_classes))
-        if "-1" == hue_order[0]:
-            hue_order[:-1] = hue_order[1:]
-            hue_order[-1] = "-1"
+        spatial_classes: NDArray[_np.int_] = self.get_spatial_classes(
+            return_string=True
+        )
+        hue_order: NDArray[_np.str_] = _np.sort(spatial_classes)
+        if "Undefined" in hue_order:
+            i_undefined: int = _np.where(hue_order == "Undefined")[0][0]
+            hue_order = _np.append(_np.delete(hue_order, i_undefined), "Undefined")
         return sns.scatterplot(
             x=self.adata_spatial.obs["x"].values,
             y=self.adata_spatial.obs["y"].values,

@@ -663,7 +663,7 @@ Coverage: {coverage*100:.2f}%
         spatial_classes: NDArray[_np.str_] = self.get_spatial_classes(
             return_string=True
         )
-        hue_order: NDArray[_np.str_] = _np.sort(spatial_classes)
+        hue_order: NDArray[_np.str_] = _np.sort(_np.unique(spatial_classes))
         if "Undefined" in hue_order:
             i_undefined: int = _np.where(hue_order == "Undefined")[0][0]
             hue_order = _np.append(_np.delete(hue_order, i_undefined), "Undefined")

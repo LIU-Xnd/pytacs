@@ -2,7 +2,7 @@
 
 ## Step 1. Prepare your data
 
-```{Python}
+```Python
 import pytacs as tx  # Our tools
 import scanpy as sc  # A popular single-cell analysis tool
 
@@ -11,6 +11,8 @@ data_preper = tx.AnnDataPreparer(
 	sn_adata=sc.read_h5ad("your-snRNA-seq-data.h5ad"),
     sp_adata=sc.read_h5ad("your-ST-data.h5ad"),
 )
+# # Filter for highly variable genes, if you want
+# data_preper.filter_highly_variable_genes()
 print(data_preper)
 ```
 
@@ -42,9 +44,9 @@ clf.fit(data_preper.sn_adata)
 
 ## Step 3. Handle the spatial transcriptome
 
-```{Python}
+```Python
 # Step 3. Create a spatial handler
-sph = tx.SpatialHandlerParallel(
+sph = tx.SpatialHandler(
 	adata_spatial=data_preper.sp_adata,
     local_classifier=clf,
     n_parallel=1000,  # mem for time
@@ -73,7 +75,7 @@ Output:
 --- --- --- --- --- ---
 ```
 
-```{Python}
+```Python
 # Premapping for context information
 sph.run_preMapping()
 ```
@@ -86,7 +88,7 @@ Running second round premapping ...
 100%|██████████| 9216/9216 [00:03<00:00, 2974.48it/s]Done.
 ```
 
-```{Python}
+```Python
 # Segmentation
 sph.run_segmentation(
 	verbose=False,

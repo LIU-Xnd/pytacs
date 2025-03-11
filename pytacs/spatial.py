@@ -189,9 +189,6 @@ class SpatialHandler:
             p=2,
             output_type="dok_matrix",
         )
-        # Here we can define a sparse version of
-        # _distance_matrix for saving memory.
-
         return
 
     def _find_adjacentOfOneSpot_spotIds(self, idx_this_spot: int) -> NDArray[_np.int_]:
@@ -351,7 +348,7 @@ class SpatialHandler:
             probas = probas[:-1]
         return probas
 
-    def _buildFiltration_addOneSpot(self, idx_centroid, verbose=True):
+    def _buildFiltration_addOneSpot(self, idx_centroid, verbose=True) -> int:
         """Adds one spot for the cell centered at idx_centroid.
 
         Filtration list includes idx_centroid itself.
@@ -464,7 +461,7 @@ class SpatialHandler:
                 idx: int = idx_centroids[where_running][i_idx]
                 if confidence >= self.threshold_confidence:
                     self._mask_newIds[_np.array(self.filtrations[idx])] = idx
-                    self._classes_new[idx] = labels[where_running][i_idx]
+                    self._classes_new[idx] = labels[where_running[i_idx]]
                     self._confidences_new[idx] = confidence
                     # Mark confident and drop
                     where_to_drop.append(i_idx)
@@ -482,14 +479,14 @@ class SpatialHandler:
                         )[0, :]
                         label_ = _np.argmax(proba_)
                         conf_ = proba_[label_]
-                        confidences[where_running][i_idx] = conf_
+                        confidences[where_running[i_idx]] = conf_
                         if conf_ >= self.threshold_confidence:
-                            labels[where_running][i_idx] = label_
+                            labels[where_running[i_idx]] = label_
                             self._mask_newIds[_np.array(self.filtrations[idx])] = idx
                             self._classes_new[idx] = label_
                             self._confidences_new[idx] = conf_
                         else:
-                            labels[where_running][i_idx] = -1
+                            labels[where_running[i_idx]] = -1
                         # Drop this
                         where_to_drop.append(i_idx)
                         break
@@ -651,7 +648,7 @@ Coverage: {coverage*100:.2f}%
             if new_id == -1:
                 res[i_sample] = -1
                 continue
-            new_class = self.classes_new[new_id]
+            new_class = self._classes_new[new_id]
             res[i_sample] = new_class
         if return_string:
             return _np.array(
@@ -659,11 +656,11 @@ Coverage: {coverage*100:.2f}%
             )
         return res
 
-    def run_plotClasses(self):
+    def run_plotClasses(self, **plot_kwargs):
         """Plot classes of each spot. Classes sorted alphabetically."""
         import seaborn as sns
 
-        spatial_classes: NDArray[_np.int_] = self.get_spatial_classes(
+        spatial_classes: NDArray[_np.str_] = self.get_spatial_classes(
             return_string=True
         )
         hue_order: NDArray[_np.str_] = _np.sort(spatial_classes)
@@ -675,6 +672,7 @@ Coverage: {coverage*100:.2f}%
             y=self.adata_spatial.obs["y"].values,
             hue=spatial_classes,
             hue_order=hue_order,
+            **plot_kwargs,
         )
 
     def run_plotNewIds(self):

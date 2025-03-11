@@ -68,4 +68,4 @@ For detailed usage, see [Basic_Usage_of_pytacs.md](./Basic_Usage_of_pytacs.md)
 ```
 
 ## Demo
-[Test_on_synthetic_data_version1.1.3_autopilot.ipynb.ipynb](./Test_on_synthetic_data_version1.1.3_autopilot.ipynb)
+[Demo](./data/demo/demo.ipynb)

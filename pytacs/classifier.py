@@ -445,9 +445,23 @@ class GaussianNaiveBayes(_LocalClassifier):
         return None
 
     @staticmethod
-    def _gaussian_tail_probability(x_obs: float, mean: float, var: float) -> float:
+    def _gaussian_tail_probability(
+        x_obs: NDArray[_np.float_],
+        mean: NDArray[_np.float_],
+        var: NDArray[_np.float_],
+    ) -> NDArray[_np.float_]:
         """Calculate the two-tail probability for
-        each feature (assuming Gaussian distribution)"""
+        each feature (assuming Gaussian distribution).
+
+        Args:
+            x_obs: 2d-array of observation-by-feature sample matrix.
+            mean: 1d-array of feature mean values.
+            var: 1d-array of feature variance values.
+
+        Return:
+            A 2d-array of sample-by-feature tail probs.
+        """
+        assert x_obs.shape[1] == mean.shape[0] == var.shape[0]
         return 1 - _np.abs(2 * _norm.cdf(x_obs, loc=mean, scale=_np.sqrt(var)) - 1)
 
     def fit(self, sn_adata: _AnnData, colname_classes: str = "cell_type"):
@@ -521,22 +535,19 @@ class GaussianNaiveBayes(_LocalClassifier):
             return self._model.predict_proba(X_ready)
         assert isinstance(self._classes, _np.ndarray)
         tail_probabilities = _np.zeros(shape=(X_ready.shape[0], len(self._classes)))
-        for i, sample in enumerate(X_ready):
-            for j, cls_name in enumerate(self._classes):
-                tail_probs = [
-                    GaussianNaiveBayes._gaussian_tail_probability(
-                        x_obs=sample[k],
-                        mean=self._model.theta_[j, k],
-                        var=self._model.var_[j, k],
-                    )
-                    for k in range(X_ready.shape[1])
-                ]  # for each feature.
-                if self._prob_mode == "multiplied":
-                    tail_probabilities[i, j] = _np.prod(
-                        tail_probs
-                    )  # Assuming independence across features
-                else:  # average
-                    tail_probabilities[i, j] = _np.mean(tail_probs)
+        for j_cls, _ in enumerate(self._classes):
+            tail_probs = GaussianNaiveBayes._gaussian_tail_probability(
+                x_obs=X_ready,
+                mean=self._model.theta_[j_cls, :],
+                var=self._model.var_[j_cls, :],
+            )  # Probs of this class
+            if self._prob_mode == "multiplied":
+                tail_probabilities[:, j_cls] = _np.prod(
+                    tail_probs,
+                    axis=1,
+                )  # Assuming independence across features
+            else:  # average
+                tail_probabilities[:, j_cls] = _np.mean(tail_probs, axis=1)
         return tail_probabilities
 
     def predict(
@@ -630,7 +641,6 @@ class QProximityClassifier(_LocalClassifier):
         standardize_PCs: bool = True,
         q: float = 0.85,
         capped: bool = True,
-        **kwargs,
     ):
         super().__init__(threshold_confidence=threshold_confidence)
         # The ._model_points is a dict mapping class_id to processed sample

@@ -193,7 +193,7 @@ class SpatialHandler:
 
     def _find_adjacentOfOneSpot_spotIds(self, idx_this_spot: int) -> NDArray[_np.int_]:
         """Find all adjacent spots, including self."""
-        if self.cache_distance_matrix is _UNDEFINED:
+        if isinstance(self.cache_distance_matrix, _UndefinedType):
             self._compute_distance_matrix()
         assert isinstance(self.cache_distance_matrix, _dok_matrix)
         distances = self.cache_distance_matrix[[idx_this_spot], :].toarray()[0, :]
@@ -603,7 +603,9 @@ Coverage: {coverage*100:.2f}%
     ) -> _AnnData:
         """Get segmented single-cell level spatial transcriptomic AnnData.
         Note: cache shares the same id with what this method returns."""
-        if (not force) and (not (self.cache_singleCellAnnData is _UNDEFINED)):
+        if (not force) and (
+            not isinstance(self.cache_singleCellAnnData, _UndefinedType)
+        ):
             return self.cache_singleCellAnnData
         sc_X = []
         raw_X = self.adata_spatial.X.toarray()

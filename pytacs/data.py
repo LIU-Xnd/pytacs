@@ -17,6 +17,8 @@ from .utils import save_and_tidy_index as _save_and_tidy_index
 from .utils import _UNDEFINED, _UndefinedType
 from .utils import to_array as _to_array
 
+from collections import Counter as _Counter
+
 
 class AnnDataPreparer:
     """Prepare snRNA-seq and spatial transcriptomic data for pytacs.
@@ -498,3 +500,25 @@ class AnnDataPreparer:
         self.sn_adata_downsampledFromSpAdata.obs[new_colname_match] = new_annotations
         tqdm.write(f'Annotations written in .obs["{new_colname_match}"].')
         return (df_match, df_match_bool)
+
+
+# Some utililties
+
+
+def downsample_cells(
+    adata: _AnnData,
+    n_samples: int = 10000,
+    colname_celltype: str = "cell_type",
+    reindex: bool = True,
+) -> tuple[_AnnData, _Counter]:
+    """Downsample a fraction of cells from adata.
+
+    Return Tuple of (result_adata, Counter of downsampled cell-types)"""
+    ids_sampled = _np.random.choice(
+        _np.arange(adata.shape[0]), size=n_samples, replace=False
+    )
+    result = adata[ids_sampled, :].copy()
+    if reindex:
+        result.obs.index = _np.arange(result.shape[0]).astype(str)
+    counter = _Counter(result.obs[colname_celltype].values)
+    return (result, counter)

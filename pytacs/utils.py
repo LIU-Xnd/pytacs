@@ -113,7 +113,6 @@ def save_and_tidy_index(
 # --- Reshaping operations --- <<<
 
 
-# >>> --- math tools ---
 def radial_basis_function(
     location_vector: _np.ndarray,
     centroid_vector: _np.ndarray | None = None,
@@ -127,9 +126,6 @@ def radial_basis_function(
         -_np.power(_np.linalg.norm(location_vector - centroid_vector), 2)
         / (2 * _np.power(scale, 2))
     )
-
-
-# --- math tools --- <<<
 
 
 def to_array(

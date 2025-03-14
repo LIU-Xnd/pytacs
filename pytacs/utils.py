@@ -144,3 +144,20 @@ def to_array(
 
 def deepcopy_dict(d: dict[int, list]) -> dict:
     return {k: v.copy() for k, v in d.items()}
+
+
+def truncate_top_n(
+    arr: _np.ndarray,
+    n_top: int,
+    return_bools: bool = False,
+) -> _np.ndarray:
+    assert len(arr.shape) == 1
+    ilocs_truncated = _np.argsort(arr)[::-1][:n_top]
+    res: _np.ndarray = _np.zeros(
+        shape=arr.shape,
+        dtype=arr.dtype,
+    )
+    res[ilocs_truncated] = 1.0
+    if return_bools:
+        res = _np.bool_(res)
+    return res

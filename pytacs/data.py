@@ -16,6 +16,7 @@ from tqdm import tqdm
 from .utils import save_and_tidy_index as _save_and_tidy_index
 from .utils import _UNDEFINED, _UndefinedType
 from .utils import to_array as _to_array
+from .utils import truncate_top_n as _truncate_top_n
 
 from collections import Counter as _Counter
 
@@ -391,6 +392,7 @@ class AnnDataPreparer:
         sep_for_multiple_types: str = "+",
         new_name_novel: str = "novel",
         method: Literal["cosine", "jaccard"] = "cosine",
+        n_top_genes_truncate_jaccard: int | None = None,
     ) -> _pd.DataFrame:
         """updates .sn_adata_downsampledFromSpAdata.
 
@@ -459,9 +461,17 @@ class AnnDataPreparer:
         for ct in tqdm(celltypes, desc="Compute mutual similarity", ncols=60):
             for clt in cellclusters:
                 if method == "jaccard":
+                    ctsig = celltype_signatures[ct]
+                    ccsig = cellclusters_signatures[clt]
+                    if isinstance(n_top_genes_truncate_jaccard, int):
+                        ctsig = _truncate_top_n(
+                            ctsig, n_top=n_top_genes_truncate_jaccard
+                        )
+                        ccsig = _truncate_top_n(
+                            ccsig, n_top=n_top_genes_truncate_jaccard
+                        )
                     df_match.loc[ct, clt] = (
-                        _np.bool_(celltype_signatures[ct])
-                        == _np.bool_(cellclusters_signatures[clt])
+                        _np.bool_(ctsig) == _np.bool_(ccsig)
                     ).mean()
                 else:  # 'cosine'
                     df_match.loc[ct, clt] = (

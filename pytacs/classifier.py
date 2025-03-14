@@ -14,6 +14,7 @@ from typing import Iterable, Literal
 from .utils import _UNDEFINED, _UndefinedType
 from .utils import subCountMatrix_genes2InGenes1 as _get_subCountMatrix
 from .utils import to_array as _to_array
+from .utils import truncate_top_n as _truncate_top_n
 
 
 # >>> ---- Local Classifier ----
@@ -937,6 +938,144 @@ class CosineSimilarityClassifier(_LocalClassifier):
         )
         corr = _np.maximum(1e-8, X_ready @ self._model_signatures.T)
         return corr
+
+    def predict(
+        self,
+        X: _np.ndarray,
+        genes: Iterable[str] | None = None,
+    ):
+        """Predicts classes of each sample. For example, if prediction is i,
+         then the predicted class is self.classes[i].
+         For those below confidence threshold,
+         predicted classes are set to -1.
+
+        Args:
+            X (NDArray | _csr_matrix): input count matrix.
+
+            genes (Iterable[str] | None): list of genes corresponding to
+             those of X's columns. If None, set to pretrained gene list.
+
+        Return:
+            NDArray[_np.int_]: an array of predicted classIds."""
+        return super().predict(X, genes)
+
+
+class JaccardClassifier(_LocalClassifier):
+    """Not Recommended.
+
+    This classifier would predict probs for each class, EXCLUDING the
+    negative controls.
+
+    Ref samples of counts of each class are normalized,
+    log1p transformed (if specified), and averaged as the ref signatures.
+    Pearson's correlation is used to determined the probs for each sample
+    to be in a class.
+
+    .fit(), .predict(), and .predict_proba() are specially built, but
+    often the last two methods are not to be called manually.
+
+    Predicted integer i indicates the class self._classes[i].
+
+    Jaccard metric:
+    Jacc(arr1, arr2) = mean(bool_(arr1)==bool_(arr2))
+
+    Args
+    ----------
+    threshold_confidence : float, default=0.75
+        Confidence according to which whether the classifier predicts a sample
+        to be in a class.
+
+    log1p : bool, default=True
+        Whether to compare log1p transformed expression vectors instead of
+        raw counts.
+    """
+
+    def __init__(
+        self,
+        threshold_confidence: float = 0.75,
+        log1p: bool = True,
+    ):
+        super().__init__(threshold_confidence=threshold_confidence)
+        self._log1p = log1p
+        self._model_signatures: _np.ndarray | _UndefinedType = _UNDEFINED
+        return
+
+    def fit(
+        self,
+        sn_adata: _AnnData,
+        colname_classes: str = "cell_type",
+        n_top_genes_truncated: int | None = None,
+    ) -> dict:
+        """Trains the local classifier using the AnnData format snRNA-seq data.
+
+        Args:
+            sn_adata (AnnData): snRNA-seq h5ad data. Must have attributes:
+             .X, the sample-by-gene count matrix;
+             .obs['cell_type'] or named otherwise, that indicates the label of
+             each sample;
+             .var, whose index indicates the genes used for training.
+
+            colname_classes (str): the name of the column in .obs that
+             indicates the cell types (classes).
+             Negative controls should be named '__NegativeControl' which is the
+             default name of negative controls generated
+             by pytacs.data.AnnDataPreparer.
+
+            n_top_genes_truncated (int | None): only the first `n_top_genes_truncated` (int)
+            many expressed genes are kept as True (expressed), the rest are set to False.
+            `None` for not truncating.
+
+        Return:
+            self (Model): a trained model (self).
+        """
+        data_ready: dict = super().fit(
+            sn_adata=sn_adata,
+            colname_classes=colname_classes,
+        )
+        assert not self._has_negative_control
+
+        # "Train" the model
+        assert isinstance(self._classes, _np.ndarray)
+        self._model_signatures = _np.zeros(
+            shape=(len(self._classes), len(self._genes)),
+            dtype=bool,
+        )
+        for i_cls, cls_name in enumerate(self._classes):
+            signature: _np.ndarray = data_ready["X"][data_ready["y"] == i_cls, :]
+            # Average
+            signature = signature.mean(axis=0)
+            if n_top_genes_truncated is not None:
+                assert isinstance(n_top_genes_truncated, int)
+                signature = _truncate_top_n(signature, n_top=n_top_genes_truncated)
+            self._model_signatures[i_cls, :] = _np.bool_(signature)
+        return self
+
+    def predict_proba(
+        self,
+        X: NDArray | _csr_matrix,
+        genes: Iterable[str] | None = None,
+    ) -> NDArray[_np.float_]:
+        """Predicts the probabilities for each
+        sample to be of each class.
+
+        Args:
+            X (NDArray | _csr_matrix): input count matrix.
+
+            genes (Iterable[str] | None): list of genes corresponding to
+             X's columns. If None, set to pretrained snRNA-seq's gene list.
+
+        Return:
+            2darray[float]: probs of falling into each class;
+             each row is a sample and each column is a class."""
+        X_ready: _np.ndarray = super().predict_proba(X, genes)["X"]
+        probas = _np.zeros(
+            shape=(X_ready.shape[0], len(self.classes)),
+        )
+        for i_cls, _ in enumerate(self.classes):
+            probas[:, i_cls] = (
+                _np.bool_(X_ready) == self._model_signatures[i_cls, :]
+            ).mean(axis=1)
+        return probas
 
     def predict(
         self,

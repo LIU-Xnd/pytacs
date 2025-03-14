@@ -45,7 +45,7 @@
 #  needs addressing in the future.
 # - Write __repr__ for _LocalClassifier and its child classes.
 
-__version__ = "1.2.2"
+__version__ = "1.4.3"
 
 from .data import AnnDataPreparer
 from .classifier import (
@@ -53,5 +53,6 @@ from .classifier import (
     GaussianNaiveBayes,
     QProximityClassifier,
     CosineSimilarityClassifier,
+    JaccardClassifier,
 )
 from .spatial import SpatialHandler

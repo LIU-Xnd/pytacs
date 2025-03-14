@@ -8,9 +8,12 @@ import numpy as _np
 from numpy.typing import NDArray
 from scipy.stats import norm as _norm
 from scipy.sparse import csr_matrix as _csr_matrix
+from scipy.sparse import dok_matrix as _dok_matrix
+from scipy.spatial import cKDTree as _cKDTree
 from typing import Iterable, Literal
 from .utils import _UNDEFINED, _UndefinedType
 from .utils import subCountMatrix_genes2InGenes1 as _get_subCountMatrix
+from .utils import to_array as _to_array
 
 
 # >>> ---- Local Classifier ----
@@ -163,9 +166,7 @@ class _LocalClassifier:
 
         Needs overwriting."""
 
-        if type(X) is _csr_matrix:
-            X = X.toarray()
-        assert type(X) is _np.ndarray
+        X: _np.ndarray = _to_array(X)
         assert len(X.shape) == 2, "X must be a sample-by-gene matrix"
         assert isinstance(self._genes, Iterable)
         genes_: list[str] = []
@@ -377,7 +378,9 @@ class SVM(_LocalClassifier):
 
 
 class GaussianNaiveBayes(_LocalClassifier):
-    """This classifier based on Gaussian Naive Bayes models would predict
+    """Not Recommended.
+
+    This classifier based on Gaussian Naive Bayes models would predict
      probabilities for each class, as well as
      the negative-control class (the last class, but not necessary),
      if generated.
@@ -419,8 +422,7 @@ class GaussianNaiveBayes(_LocalClassifier):
         - 'relative': relative probs among classes;
         - 'multiplied': two-tail cumulative multiplied probs;
         (above two are unstable to outlier features)
-        - 'average': average two-tail cumulative probs among features
-         (recommended).
+        - 'average': average two-tail cumulative probs among features.
     """
 
     def __init__(
@@ -766,25 +768,30 @@ class QProximityClassifier(_LocalClassifier):
         # Probs
         assert type(self._classes) is _np.ndarray
         probs = _np.zeros(shape=(X_ready.shape[0], len(self._classes)))
-        for i_class, cls_name in enumerate(self._classes):
-            # Compute distances of each sample to each ref points in the class
-            dist_matrix = _np.zeros(
-                shape=(X_ready.shape[0], self._model_points[i_class].shape[0])
+
+        # Compute distances of each sample to each ref points in the class
+        # Update 3.4.1: use cKDTree to implement this and parallelize it
+        tree_samples = _cKDTree(
+            data=X_ready,
+        )
+        for i_class, _ in enumerate(self._classes):
+            tree_refs = _cKDTree(self._model_points[i_class])
+            dist_matrix: _dok_matrix = tree_samples.sparse_distance_matrix(
+                other=tree_refs,
+                max_distance=self._model_radii[i_class],
+                p=2,
+                output_type="dok_matrix",
+            ).astype(
+                bool
+            )  # True indicates proximal and False vice-versa.
+
+            # Count proximal point proportion for each sample
+            n_proximal: NDArray[_np.int_] = _to_array(
+                dist_matrix.sum(axis=1), squeeze=True
             )
-            for i_sample, sample in enumerate(X_ready):
-                for i_refpoint, refpoint in enumerate(self._model_points[i_class]):
-                    dist_matrix[i_sample, i_refpoint] = _np.linalg.norm(
-                        sample - refpoint
-                    )
-                # Count proximal points
-                n_proximal = _np.sum(
-                    dist_matrix[i_sample, :] <= self._model_radii[i_class]
-                )
-                probs[i_sample, i_class] = (
-                    n_proximal / self._model_n_points_keep[i_class]
-                )
-                if self._capped:
-                    probs[i_sample, i_class] = min(probs[i_sample, i_class], 1)
+            probs[:, i_class] = n_proximal / self._model_n_points_keep[i_class]
+            if self._capped:
+                probs[:, i_class] = _np.minimum(probs[:, i_class], 1.0)
 
         return probs
 

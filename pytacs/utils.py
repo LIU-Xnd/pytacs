@@ -1,6 +1,8 @@
 import numpy as _np
 from scanpy import AnnData as _AnnData
 from scipy.sparse import csr_matrix as _csr_matrix
+from scipy.sparse import dok_matrix as _dok_matrix
+from numpy import matrix as _matrix
 
 
 # Placeholder type
@@ -130,10 +132,17 @@ def radial_basis_function(
 # --- math tools --- <<<
 
 
-def to_array(X: _np.ndarray | _csr_matrix) -> _np.ndarray:
-    if isinstance(X, _csr_matrix):
-        return X.toarray()
+def to_array(
+    X: _np.ndarray | _csr_matrix | _dok_matrix | _matrix,
+    squeeze: bool = False,
+) -> _np.ndarray:
+    if isinstance(X, _csr_matrix) or isinstance(X, _dok_matrix):
+        X = X.toarray()
+    elif isinstance(X, _matrix):
+        X = _np.array(X.tolist())
     assert isinstance(X, _np.ndarray)
+    if squeeze:
+        X = X.reshape(-1)
     return X
 
 

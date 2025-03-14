@@ -196,7 +196,9 @@ class SpatialHandler:
         if isinstance(self.cache_distance_matrix, _UndefinedType):
             self._compute_distance_matrix()
         assert isinstance(self.cache_distance_matrix, _dok_matrix)
-        distances = self.cache_distance_matrix[[idx_this_spot], :].toarray()[0, :]
+        distances = _to_array(
+            self.cache_distance_matrix[[idx_this_spot], :], squeeze=True
+        )
         idxs_adjacent = _np.where(
             (0 < distances) * (distances <= self.threshold_adjacent)
         )[0]
@@ -323,7 +325,7 @@ class SpatialHandler:
         """Returns a 1d-array of counts of genes.
         Load from cache.
         """
-        return self.cache_aggregated_counts[[idx_centroid], :].toarray()[0, :]
+        return _to_array(self.cache_aggregated_counts[[idx_centroid], :], squeeze=True)
 
     def _compute_confidence_of_filtration(
         self,
@@ -340,7 +342,7 @@ class SpatialHandler:
                     idx, :
                 ].copy()
         probas: NDArray[_np.float_] = self.local_classifier.predict_proba(
-            X=self.cache_aggregated_counts[idx_centroids, :].toarray(),
+            X=_to_array(self.cache_aggregated_counts[idx_centroids, :]),
             genes=self.adata_spatial.var.index,
         )
         # Only keeps positive classes
@@ -608,7 +610,7 @@ Coverage: {coverage*100:.2f}%
         ):
             return self.cache_singleCellAnnData
         sc_X = []
-        raw_X = self.adata_spatial.X.toarray()
+        raw_X = _to_array(self.adata_spatial.X)
         for ix_new in self.sampleIds_new:
             sc_X.append(list(raw_X[_np.array(self.filtrations[ix_new]), :].sum(axis=0)))
         sc_adata = _AnnData(

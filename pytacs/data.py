@@ -15,6 +15,7 @@ from typing import Literal
 from tqdm import tqdm
 from .utils import save_and_tidy_index as _save_and_tidy_index
 from .utils import _UNDEFINED, _UndefinedType
+from .utils import to_array as _to_array
 
 
 class AnnDataPreparer:
@@ -150,7 +151,7 @@ class AnnDataPreparer:
         n_old = self.sn_adata.X.shape[0]
         n_new = int(_np.ceil(n_old * folds_newToOld))
         n_samplingFrom = int(_np.ceil(ratio_samplingFrom * n_old))
-        X_old: _np.ndarray = self.sn_adata.X.toarray()
+        X_old: _np.ndarray = _to_array(self.sn_adata.X)
         X_extra: _np.ndarray = _np.zeros(shape=(n_new, X_old.shape[1]), dtype=int)
         for i_gene in range(X_old.shape[1]):
             # Select the least n_samplingFrom expressed samples
@@ -316,7 +317,7 @@ class AnnDataPreparer:
             id_sampled: int = indices_pool[iloc_sampled]
             indices_pool = _np.delete(indices_pool, iloc_sampled)
             out_ids.append(id_sampled)
-            dist_array = dist_matrix[id_sampled, :].toarray().reshape(-1)
+            dist_array = _to_array(dist_matrix[id_sampled, :], squeeze=True)
             where_local: NDArray[_np.bool_] = (dist_array > 0.0) * (
                 dist_array <= radius_downsampling
             )

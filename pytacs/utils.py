@@ -14,6 +14,9 @@ class _UndefinedType:
         return "_UNDEFINED"
 
 
+# Alias
+_Undefined = _UndefinedType
+
 _UNDEFINED = _UndefinedType()
 
 

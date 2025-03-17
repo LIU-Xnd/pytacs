@@ -10,6 +10,9 @@ from scipy.spatial import cKDTree as _cKDTree
 
 from scipy.cluster.hierarchy import linkage as _linkage
 from scipy.cluster.hierarchy import fcluster as _fcluster
+
+from sklearn.svm import SVC as _SVC
+
 from typing import Literal
 
 from tqdm import tqdm
@@ -17,6 +20,8 @@ from .utils import save_and_tidy_index as _save_and_tidy_index
 from .utils import _UNDEFINED, _UndefinedType
 from .utils import to_array as _to_array
 from .utils import truncate_top_n as _truncate_top_n
+
+from .classifier import SVM as _SVM
 
 from collections import Counter as _Counter
 
@@ -391,9 +396,10 @@ class AnnDataPreparer:
         new_colname_match: str = "cell_type",
         sep_for_multiple_types: str = "+",
         new_name_novel: str = "novel",
-        method: Literal["cosine", "jaccard"] = "cosine",
+        method: Literal["SVM", "cosine", "jaccard"] = "cosine",
         n_top_genes_truncate_jaccard: int | None = None,
-    ) -> _pd.DataFrame:
+        pretrained_svm_clf: _SVM | None = None,
+    ) -> tuple[_pd.DataFrame, _pd.DataFrame]:
         """updates .sn_adata_downsampledFromSpAdata.
 
         Returns a tuple of two dataframes:
@@ -401,7 +407,7 @@ class AnnDataPreparer:
             DataFrame of Type-by-Cluster matchedness.
 
         When clusters are too few, jaccard might fail."""
-        assert method in ["cosine", "jaccard"]
+        assert method in ["SVM", "cosine", "jaccard"]
         assert isinstance(self.sn_adata_downsampledFromSpAdata, _AnnData)
         assert isinstance(self.sn_adata, _AnnData)
         assert colname_type_sn_adata in self.sn_adata.obs.columns
@@ -438,7 +444,7 @@ class AnnDataPreparer:
                 sn_adata.X[where_thistype, :].mean(axis=0).tolist()
             ).reshape(-1)
             expr_vector /= max(_np.sum(expr_vector), 1e-8)
-            expr_vector = _np.log1p(expr_vector)
+            # expr_vector = _np.log1p(expr_vector)
             celltype_signatures[ct] = expr_vector
 
         for clt in tqdm(cellclusters, desc="Compute cluster signatures", ncols=60):
@@ -449,7 +455,7 @@ class AnnDataPreparer:
                 sn_adata_downsampled.X[where_thistype, :].mean(axis=0).tolist()
             ).reshape(-1)
             expr_vector /= max(_np.sum(expr_vector), 1e-8)
-            expr_vector = _np.log1p(expr_vector)
+            # expr_vector = _np.log1p(expr_vector)
             cellclusters_signatures[clt] = expr_vector
 
         df_match = _pd.DataFrame(
@@ -458,8 +464,30 @@ class AnnDataPreparer:
             dtype=float,
         )
 
-        for ct in tqdm(celltypes, desc="Compute mutual similarity", ncols=60):
-            for clt in cellclusters:
+        if method == "SVM":
+            if pretrained_svm_clf is None:
+                tqdm.write("Pretrained SVM absent. Train from start.")
+                svc = _SVM(
+                    threshold_confidence=0.0,
+                    log1p=True,
+                    normalize=True,
+                    on_PCs=False,
+                )
+
+                tqdm.write("Training SVM ...")
+                svc.fit(sn_adata=sn_adata, colname_classes=colname_type_sn_adata)
+            else:
+                svc = pretrained_svm_clf
+
+        for clt in tqdm(cellclusters, desc="Compute mutual similarity", ncols=60):
+            if method == "SVM":
+                probas_ct = svc.predict_proba(
+                    X=_np.array([cellclusters_signatures[clt]]),
+                    genes=sn_adata_downsampled.var.index.values,
+                )[0]
+                df_match.loc[:, clt] = probas_ct
+                continue
+            for ct in celltypes:
                 if method == "jaccard":
                     ctsig = celltype_signatures[ct]
                     ccsig = cellclusters_signatures[clt]
@@ -473,13 +501,12 @@ class AnnDataPreparer:
                     df_match.loc[ct, clt] = (
                         _np.bool_(ctsig) == _np.bool_(ccsig)
                     ).mean()
-                else:  # 'cosine'
-                    df_match.loc[ct, clt] = (
-                        celltype_signatures[ct] @ cellclusters_signatures[clt]
-                    ) / max(
+                elif method == "cosine":
+                    ctsig = _np.log1p(celltype_signatures[ct])
+                    ccsig = _np.log1p(cellclusters_signatures[clt])
+                    df_match.loc[ct, clt] = (ctsig @ ccsig) / max(
                         1e-8,
-                        _np.linalg.norm(celltype_signatures[ct])
-                        * _np.linalg.norm(cellclusters_signatures[clt]),
+                        _np.linalg.norm(ctsig) * _np.linalg.norm(ccsig),
                     )
         iloc_matched_clusters = _np.argmax(df_match.values, axis=1)
         df_match_bool = df_match.copy().astype(bool)

@@ -240,7 +240,7 @@ class AnnDataPreparer:
         self.sn_adata.X = self.sn_adata.layers["counts"].copy()
         return
 
-    def downsample_signatures(
+    def sample_signatures_logl1_local_maxima(
         self,
         radius_downsampling: float = 1.5,  # 8 neighbors
         threshold_adjacent: float = 1.2,  # 4 neighbors
@@ -249,6 +249,8 @@ class AnnDataPreparer:
         colname_cluster: str = "cluster",
     ) -> None:
         """
+        Samples from spatial anndata to generate a reference sn-RNA data.
+
         First, it performs downsampling:
         A log-L1-based filter strategy is adopted to only select those locally highly
         expressed spots as an approximation of single cells.
@@ -361,8 +363,137 @@ class AnnDataPreparer:
                 index=self.sp_adata.var.index,
             ),
             uns={
+                "method": "logl1_local_maxima",
                 "threshold_adjacent": threshold_adjacent,
                 "radius_downsampling": radius_downsampling,
+            },
+        )
+
+        # Cluster
+        tqdm.write("Clustering ...")
+        self.sn_adata_downsampledFromSpAdata.layers["counts"] = (
+            self.sn_adata_downsampledFromSpAdata.X.copy()
+        )
+        _sc.pp.normalize_total(self.sn_adata_downsampledFromSpAdata, target_sum=1e4)
+        _sc.pp.log1p(self.sn_adata_downsampledFromSpAdata)
+        _sc.pp.pca(self.sn_adata_downsampledFromSpAdata)
+        X_pca = self.sn_adata_downsampledFromSpAdata.obsm["X_pca"]
+        Z = _linkage(X_pca, method="ward")
+        clusters_labels = _fcluster(Z, t=n_clusters, criterion="maxclust")
+        self.sn_adata_downsampledFromSpAdata.obs[colname_cluster] = [
+            f"Cluster {i}" for i in clusters_labels
+        ]
+        self.sn_adata_downsampledFromSpAdata.layers["log1p"] = (
+            self.sn_adata_downsampledFromSpAdata.X.copy()
+        )
+        self.sn_adata_downsampledFromSpAdata.X = (
+            self.sn_adata_downsampledFromSpAdata.layers["counts"]
+        )
+        tqdm.write("Done.")
+        return
+
+    def sample_signatures_simple_bin(
+        self,
+        threshold_adjacent: float = 1.5,  # 8 neighbors
+        n_samples: int | None = None,
+        n_clusters: int = 9,
+        colname_cluster: str = "cluster",
+    ) -> None:
+        """
+        Samples from spatial anndata to generate a reference sn-RNA data.
+
+        It performs binning on each spot to alleviate sparsity issue:
+        Each time, a spot is taken as the centroid, and it aggregates
+        surrounding spots to form a corpus to approximate single-cell level,
+        just like the traditional way. Set `threshold_adjacent` to 0. to avoid binning.
+
+        Finally, it performs clustering to get several
+        clusters as reference signatures to train downstream local classifiers.
+
+        Update self.sn_adata_downsampledFromSpAdata.
+            .obs:
+                ['cluster']: 'cluster 1', 'cluster 2', ...
+                ...
+        Args:
+            threshold_adjacent (float): Used in binning phase. Spots within this range
+            are considered neighbors. Set to 0 to skip binning post-process.
+
+            n_samples (int): Number of samples to generate.
+
+            n_clusters (int): Number of clusters to generate. Set it a little larger than expected
+            for novel cell type exploration.
+        """
+        assert isinstance(self.sp_adata, _AnnData)
+        # Downsampling
+        # Compute logl1 scores for each spot
+        if isinstance(self.sp_adata.X, _np.ndarray):
+            print(f"Warning: sp_adata.X is dense type. Converting to csr_matrix type.")
+            self.sp_adata.X = _csr_matrix(self.sp_adata.X)
+        assert isinstance(self.sp_adata.X, _csr_matrix)
+
+        if n_samples is None:
+            n_samples: int = self.sp_adata.shape[0]
+
+        # Create spatial distance matrix
+        ckdtree_points = _cKDTree(self.sp_adata.obs[["x", "y"]].values)
+        dist_matrix: _dok_matrix = ckdtree_points.sparse_distance_matrix(
+            other=ckdtree_points,
+            max_distance=threshold_adjacent + 1e-8,
+            p=2,
+            output_type="dok_matrix",
+        )
+        # Prepare output anndata
+        out_matrix = _dok_matrix(
+            (min(self.sp_adata.shape[0], n_samples), self.sp_adata.shape[1]), int
+        )
+        out_ids = list()
+        out_ids_target = list()
+
+        # temporarily use dok_matrix for fast re-assignment
+        # Make sure indices are integerized
+        indices_pool: NDArray[_np.int_] = self.sp_adata.obs.index.values.astype(int)
+        assert _np.all(indices_pool == _np.arange(self.sp_adata.shape[0]))
+
+        for i_sampling in tqdm(
+            range(min(self.sp_adata.shape[0], n_samples)),
+            desc="Sampling",
+            ncols=60,
+        ):
+            assert len(indices_pool) > 0  # DEBUG: This should never raise
+            iloc_sampled: int = _np.random.choice(range(len(indices_pool)))
+            id_sampled: int = indices_pool[iloc_sampled]
+            indices_pool = _np.delete(indices_pool, iloc_sampled)
+            out_ids.append(id_sampled)
+            dist_array = _to_array(dist_matrix[id_sampled, :], squeeze=True)
+            where_local: NDArray[_np.bool_] = (dist_array > 0.0) * (
+                dist_array <= threshold_adjacent
+            )
+            where_local[id_sampled] = True
+            id_target: int = id_sampled
+            out_ids_target.append(id_target)
+
+            # Post-process: binning (threshold_adjacent=0 to skip this step)
+            # Find binning neighbors
+            where_binning: NDArray[_np.bool_] = where_local
+            expr_vector: NDArray = _np.array(
+                self.sp_adata.X[where_binning, :].sum(axis=0).tolist()
+            ).reshape(-1)
+            out_matrix[i_sampling, :] = expr_vector
+
+        self.sn_adata_downsampledFromSpAdata = _AnnData(
+            X=_csr_matrix(out_matrix),
+            obs=_pd.DataFrame(
+                {
+                    "id_target": out_ids_target,
+                },
+                index=_np.arange(out_matrix.shape[0]).astype(str),
+            ),
+            var=_pd.DataFrame(
+                index=self.sp_adata.var.index,
+            ),
+            uns={
+                "method": "simple_bin",
+                "threshold_adjacent": threshold_adjacent,
             },
         )
 

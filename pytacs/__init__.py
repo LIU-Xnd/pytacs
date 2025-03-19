@@ -1,4 +1,4 @@
-# pytacs: Python Topological Automatic Cell Segmentation -
+# pytacs: Python Topology-Aware Cell-Type Spotting -
 #  an improved version of TopACT (https://gitlab.com/kfbenjamin/topact)
 #  implementation.
 
@@ -10,44 +10,10 @@
 # - Independency from imaging segmentation information;
 # - Improved local classifier strategy - higher inferencing accuracy;
 
-# Updates v1.1.0:
-# TACSA - Topological Automatic Cell Segmentation with Autopilot
-#  or just TACS, Topological Autopiloting Cell Segmentation?
-# Plan:
-# - Two-round pre-mapping for inference prior knowledge
-#   + 1st-round: spot inference probability
-#   + 2nd-round: grouping spots at inference prob to
-#    form inference unit; regenerate inference probs
-#   based on units.
-#   + Use this inference probs for probs of adding
-#    next spots.
 
+__version__ = "1.5.0"
 
-# SUSPENDED v1.1.0 (beta):
-# Plan:
-# - Try to merge imaging data for a
-# image-based local classifier (CellPose + TopACT)
-#   + Find ways to generate confidence from imaging
-#    Maybe the highest IOU?
-#   + Estimate cell size (n_spots) from imaging
-#   + Python implemented CellPose API
-#   + Strategy of adding spots: learning from imaging
-
-# Future:
-# - Improve run_getSingleCellAnnData()
-#    + Add: Coordinate remapping
-#    + Add: Shape smoothing (if a spot is surrounded by spots of the same
-#    class, then make it of that class, too)
-# - Improve documentations
-# - The spatial coordinates by convention should have been saved in `.obsm`
-#  because `'x'` and `'y'` are related. But in this tool they are expected to be
-#  put separately as columns in `.obs`. This might be a break of convention that
-#  needs addressing in the future.
-# - Write __repr__ for _LocalClassifier and its child classes.
-
-__version__ = "1.4.3"
-
-from .data import AnnDataPreparer
+from .data import AnnDataPreparer, downsample_cells, compare_umap
 from .classifier import (
     SVM,
     GaussianNaiveBayes,

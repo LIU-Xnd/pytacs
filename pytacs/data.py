@@ -3,7 +3,9 @@ from scanpy import AnnData as _AnnData
 import scanpy as _sc
 import pandas as _pd
 import numpy as _np
-from numpy.typing import NDArray
+from matplotlib.axes import Axes as _Axes
+
+from numpy.typing import NDArray as _NDArray
 from scipy.sparse import csr_matrix as _csr_matrix
 from scipy.sparse import dok_matrix as _dok_matrix
 from scipy.spatial import cKDTree as _cKDTree
@@ -13,9 +15,10 @@ from scipy.cluster.hierarchy import fcluster as _fcluster
 
 from sklearn.svm import SVC as _SVC
 
-from typing import Literal
+from typing import Literal as _Literal
+from typing import Iterator as _Iterator
 
-from tqdm import tqdm
+from tqdm import tqdm as _tqdm
 from .utils import save_and_tidy_index as _save_and_tidy_index
 from .utils import _UNDEFINED, _UndefinedType
 from .utils import to_array as _to_array
@@ -314,10 +317,10 @@ class AnnDataPreparer:
         out_logl1 = list()
         # temporarily use dok_matrix for fast re-assignment
         # Make sure indices are integerized
-        indices_pool: NDArray[_np.int_] = self.sp_adata.obs.index.values.astype(int)
+        indices_pool: _NDArray[_np.int_] = self.sp_adata.obs.index.values.astype(int)
         assert _np.all(indices_pool == _np.arange(self.sp_adata.shape[0]))
 
-        for i_sampling in tqdm(
+        for i_sampling in _tqdm(
             range(min(self.sp_adata.shape[0], n_samples)),
             desc="Sampling",
             ncols=60,
@@ -328,7 +331,7 @@ class AnnDataPreparer:
             indices_pool = _np.delete(indices_pool, iloc_sampled)
             out_ids.append(id_sampled)
             dist_array = _to_array(dist_matrix[id_sampled, :], squeeze=True)
-            where_local: NDArray[_np.bool_] = (dist_array > 0.0) * (
+            where_local: _NDArray[_np.bool_] = (dist_array > 0.0) * (
                 dist_array <= radius_downsampling
             )
             where_local[id_sampled] = True
@@ -341,11 +344,11 @@ class AnnDataPreparer:
 
             # Post-process: binning (threshold_adjacent=0 to skip this step)
             # Find binning neighbors
-            where_binning: NDArray[_np.bool_] = (dist_array > 0.0) * (
+            where_binning: _NDArray[_np.bool_] = (dist_array > 0.0) * (
                 dist_array <= threshold_adjacent
             )
             where_binning[id_sampled] = True
-            expr_vector: NDArray = _np.array(
+            expr_vector: _NDArray = _np.array(
                 self.sp_adata.X[where_binning, :].sum(axis=0).tolist()
             ).reshape(-1)
             out_matrix[i_sampling, :] = expr_vector
@@ -370,7 +373,7 @@ class AnnDataPreparer:
         )
 
         # Cluster
-        tqdm.write("Clustering ...")
+        _tqdm.write("Clustering ...")
         self.sn_adata_downsampledFromSpAdata.layers["counts"] = (
             self.sn_adata_downsampledFromSpAdata.X.copy()
         )
@@ -389,7 +392,7 @@ class AnnDataPreparer:
         self.sn_adata_downsampledFromSpAdata.X = (
             self.sn_adata_downsampledFromSpAdata.layers["counts"]
         )
-        tqdm.write("Done.")
+        _tqdm.write("Done.")
         return
 
     def sample_signatures_simple_bin(
@@ -451,10 +454,10 @@ class AnnDataPreparer:
 
         # temporarily use dok_matrix for fast re-assignment
         # Make sure indices are integerized
-        indices_pool: NDArray[_np.int_] = self.sp_adata.obs.index.values.astype(int)
+        indices_pool: _NDArray[_np.int_] = self.sp_adata.obs.index.values.astype(int)
         assert _np.all(indices_pool == _np.arange(self.sp_adata.shape[0]))
 
-        for i_sampling in tqdm(
+        for i_sampling in _tqdm(
             range(min(self.sp_adata.shape[0], n_samples)),
             desc="Sampling",
             ncols=60,
@@ -465,7 +468,7 @@ class AnnDataPreparer:
             indices_pool = _np.delete(indices_pool, iloc_sampled)
             out_ids.append(id_sampled)
             dist_array = _to_array(dist_matrix[id_sampled, :], squeeze=True)
-            where_local: NDArray[_np.bool_] = (dist_array > 0.0) * (
+            where_local: _NDArray[_np.bool_] = (dist_array > 0.0) * (
                 dist_array <= threshold_adjacent
             )
             where_local[id_sampled] = True
@@ -474,8 +477,8 @@ class AnnDataPreparer:
 
             # Post-process: binning (threshold_adjacent=0 to skip this step)
             # Find binning neighbors
-            where_binning: NDArray[_np.bool_] = where_local
-            expr_vector: NDArray = _np.array(
+            where_binning: _NDArray[_np.bool_] = where_local
+            expr_vector: _NDArray = _np.array(
                 self.sp_adata.X[where_binning, :].sum(axis=0).tolist()
             ).reshape(-1)
             out_matrix[i_sampling, :] = expr_vector
@@ -498,7 +501,7 @@ class AnnDataPreparer:
         )
 
         # Cluster
-        tqdm.write("Clustering ...")
+        _tqdm.write("Clustering ...")
         self.sn_adata_downsampledFromSpAdata.layers["counts"] = (
             self.sn_adata_downsampledFromSpAdata.X.copy()
         )
@@ -517,7 +520,7 @@ class AnnDataPreparer:
         self.sn_adata_downsampledFromSpAdata.X = (
             self.sn_adata_downsampledFromSpAdata.layers["counts"]
         )
-        tqdm.write("Done.")
+        _tqdm.write("Done.")
         return
 
     def match_signatures_to_types(
@@ -527,7 +530,7 @@ class AnnDataPreparer:
         new_colname_match: str = "cell_type",
         sep_for_multiple_types: str = "+",
         new_name_novel: str = "novel",
-        method: Literal["SVM", "cosine", "jaccard"] = "cosine",
+        method: _Literal["SVM", "cosine", "jaccard"] = "cosine",
         n_top_genes_truncate_jaccard: int | None = None,
         pretrained_svm_clf: _SVM | None = None,
     ) -> tuple[_pd.DataFrame, _pd.DataFrame]:
@@ -547,7 +550,7 @@ class AnnDataPreparer:
             in self.sn_adata_downsampledFromSpAdata.obs.columns
         )
         if new_colname_match in self.sn_adata_downsampledFromSpAdata.obs.columns:
-            tqdm.write(
+            _tqdm.write(
                 f"Warning: {new_colname_match} already in sn_adata_downsampledFromSpAdata.obs!"
             )
         overlapped_genes = _np.array(
@@ -557,7 +560,7 @@ class AnnDataPreparer:
             )
         )
         if len(overlapped_genes) < 100:
-            tqdm.write(f"Warning: overlapped genes < 100 might be too few!")
+            _tqdm.write(f"Warning: overlapped genes < 100 might be too few!")
 
         sn_adata = self.sn_adata[:, overlapped_genes].copy()
         sn_adata_downsampled = self.sn_adata_downsampledFromSpAdata[
@@ -569,7 +572,7 @@ class AnnDataPreparer:
         celltype_signatures = dict()
         cellclusters_signatures = dict()
 
-        for ct in tqdm(celltypes, desc="Compute type signatures", ncols=60):
+        for ct in _tqdm(celltypes, desc="Compute type signatures", ncols=60):
             where_thistype = (sn_adata.obs[colname_type_sn_adata] == ct).values
             expr_vector = _np.array(
                 sn_adata.X[where_thistype, :].mean(axis=0).tolist()
@@ -578,7 +581,7 @@ class AnnDataPreparer:
             # expr_vector = _np.log1p(expr_vector)
             celltype_signatures[ct] = expr_vector
 
-        for clt in tqdm(cellclusters, desc="Compute cluster signatures", ncols=60):
+        for clt in _tqdm(cellclusters, desc="Compute cluster signatures", ncols=60):
             where_thistype = (
                 sn_adata_downsampled.obs[colname_cluster_downsampled] == clt
             ).values
@@ -597,7 +600,7 @@ class AnnDataPreparer:
 
         if method == "SVM":
             if pretrained_svm_clf is None:
-                tqdm.write("Pretrained SVM absent. Train from start.")
+                _tqdm.write("Pretrained SVM absent. Train from start.")
                 svc = _SVM(
                     threshold_confidence=0.0,
                     log1p=True,
@@ -605,12 +608,12 @@ class AnnDataPreparer:
                     on_PCs=False,
                 )
 
-                tqdm.write("Training SVM ...")
+                _tqdm.write("Training SVM ...")
                 svc.fit(sn_adata=sn_adata, colname_classes=colname_type_sn_adata)
             else:
                 svc = pretrained_svm_clf
 
-        for clt in tqdm(cellclusters, desc="Compute mutual similarity", ncols=60):
+        for clt in _tqdm(cellclusters, desc="Compute mutual similarity", ncols=60):
             if method == "SVM":
                 probas_ct = svc.predict_proba(
                     X=_np.array([cellclusters_signatures[clt]]),
@@ -658,7 +661,7 @@ class AnnDataPreparer:
         new_annotations = self.sn_adata_downsampledFromSpAdata.obs[
             colname_cluster_downsampled
         ].values.copy()
-        for clt in tqdm(cellclusters, desc="Record in .obs", ncols=60):
+        for clt in _tqdm(cellclusters, desc="Record in .obs", ncols=60):
             new_annotations[
                 self.sn_adata_downsampledFromSpAdata.obs[
                     colname_cluster_downsampled
@@ -666,7 +669,7 @@ class AnnDataPreparer:
                 == clt
             ] = new_annotations_mapping[clt]
         self.sn_adata_downsampledFromSpAdata.obs[new_colname_match] = new_annotations
-        tqdm.write(f'Annotations written in .obs["{new_colname_match}"].')
+        _tqdm.write(f'Annotations written in .obs["{new_colname_match}"].')
         return (df_match, df_match_bool)
 
 
@@ -690,3 +693,83 @@ def downsample_cells(
         result.obs.index = _np.arange(result.shape[0]).astype(str)
     counter = _Counter(result.obs[colname_celltype].values)
     return (result, counter)
+
+
+def compare_umap(
+    adata1: _AnnData,
+    adata2: _AnnData | None = None,
+    col_color: str | None = None,
+) -> list[_Axes]:
+    """
+    Compare the umaps of two AnnData with a
+    common observed column, e.g., "cell_type" or "cluster".
+    in one unified UMAP embedding space.
+
+    Return:
+        axes[0]: joined data with batch colored;
+        Below are for `col_color is not None`:
+        axes[1]: joined data with col_color (e.g. cluster) colored;
+        axes[2]: adata1 with col_color colored;
+        axes[3]: adata2 with col_color colored;
+    """
+    if col_color is not None:
+        assert col_color in adata1.obs.columns
+        assert col_color in adata2.obs.columns
+    if adata2 is None:
+        adata_joined: _AnnData = adata1.copy()
+        adata_joined.obs["batch"] = "1"
+    else:
+        adata_joined: _AnnData = _sc.anndata.concat(
+            adatas=[adata1, adata2],
+            axis="obs",
+            join="inner",
+            label="batch",
+            keys=["1", "2"],
+            index_unique="_",
+        )
+
+    _sc.pp.normalize_total(adata_joined)
+    _sc.pp.log1p(adata_joined)
+    _sc.pp.pca(adata_joined)
+    _sc.pp.neighbors(adata_joined)
+    _sc.tl.umap(adata_joined)
+    axes: list[_Axes] = []
+    axes.append(
+        _sc.pl.umap(
+            adata_joined,
+            color="batch",
+            show=False,
+        )
+    )
+    xlim_universal = axes[0].get_xlim()
+    ylim_universal = axes[0].get_ylim()
+    if col_color is None:
+        return axes
+    axes.append(
+        _sc.pl.umap(
+            adata_joined,
+            color=col_color,
+            show=False,
+        )
+    )
+    axes[1].set_title("Joined Data")
+    axes.append(
+        _sc.pl.umap(
+            adata_joined[(adata_joined.obs["batch"] == "1").values, :],
+            color=col_color,
+            show=False,
+        )
+    )
+    axes[2].set_title("Anndata1")
+    axes.append(
+        _sc.pl.umap(
+            adata_joined[(adata_joined.obs["batch"] == "2").values, :],
+            color=col_color,
+            show=False,
+        )
+    )
+    axes[3].set_title("Anndata2")
+    for ax in axes[1:]:
+        ax.set_xlim(xlim_universal)
+        ax.set_ylim(ylim_universal)
+    return axes

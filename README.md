@@ -1,4 +1,4 @@
-# Pytacs - Python-implemented Topological Automatic Cell Segmentation
+# Pytacs - Python-implemented Topologiy-Aware Cell-type Spotting
 
 ```
 Copyright (C) 2025 Xindong Liu

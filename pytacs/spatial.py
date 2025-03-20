@@ -1,10 +1,14 @@
 from typing import Literal
 from scanpy import AnnData as _AnnData
 import numpy as _np
-from numpy.typing import NDArray
+from numpy.typing import NDArray as _NDArray
 from scipy.sparse import csr_matrix as _csr_matrix
 from scipy.sparse import dok_matrix as _dok_matrix  # for cache_aggregated_counts
 from scipy.spatial import cKDTree as _cKDTree  # to construct sparse distance matrix
+
+from scipy.cluster.hierarchy import linkage as _linkage
+from scipy.cluster.hierarchy import fcluster as _fcluster
+
 from .classifier import _LocalClassifier
 from .utils import radial_basis_function as _rbf
 from .utils import to_array as _to_array
@@ -72,7 +76,7 @@ class SpatialHandler:
         # Same spots might appear multiple times in
         # different filtrations.
 
-        self._mask_newIds: NDArray[_np.int_] = _np.full(
+        self._mask_newIds: _NDArray[_np.int_] = _np.full(
             (self.adata_spatial.X.shape[0],), fill_value=-1, dtype=int
         )
         # mask on each old sample. -1 for not assigned; otherwise the last assigned
@@ -117,7 +121,7 @@ class SpatialHandler:
         return copy_
 
     @property
-    def mask_newIds(self) -> NDArray[_np.int_]:
+    def mask_newIds(self) -> _NDArray[_np.int_]:
         """Return a copy of mask of new ids.
         Note! A last-come-first strategy
         is used, in which case, each spot
@@ -133,17 +137,17 @@ class SpatialHandler:
         return self._mask_newIds.copy()
 
     @property
-    def masked_spotIds(self) -> NDArray[_np.int_]:
+    def masked_spotIds(self) -> _NDArray[_np.int_]:
         """Already positively masked spot ids."""
         return _np.where(self.mask_newIds > -1)[0]
 
     @property
-    def unmasked_spotIds(self) -> NDArray[_np.int_]:
+    def unmasked_spotIds(self) -> _NDArray[_np.int_]:
         """Unassigned spot ids (those that are -1)."""
         return _np.where(self.mask_newIds == -1)[0]
 
     @property
-    def sampleIds_new(self) -> NDArray[_np.int_]:
+    def sampleIds_new(self) -> _NDArray[_np.int_]:
         """Return an array of currently existing new sample indices, EXCLUDING -1."""
         return _np.sort(list(self._filtrations.keys()))
 
@@ -191,7 +195,7 @@ class SpatialHandler:
         )
         return
 
-    def _find_adjacentOfOneSpot_spotIds(self, idx_this_spot: int) -> NDArray[_np.int_]:
+    def _find_adjacentOfOneSpot_spotIds(self, idx_this_spot: int) -> _NDArray[_np.int_]:
         """Find all adjacent spots, including self."""
         if isinstance(self.cache_distance_matrix, _UndefinedType):
             self._compute_distance_matrix()
@@ -209,7 +213,7 @@ class SpatialHandler:
 
     def _find_adjacentOfManySpots_spotIds(
         self, filtration: list[int]
-    ) -> NDArray[_np.int_]:
+    ) -> _NDArray[_np.int_]:
         """Find all adjacent spots of a list of indices of spots (called filtration),
         EXCLUDING selves, and
         INCLUDING already positively masked spots.
@@ -235,7 +239,7 @@ class SpatialHandler:
         # We do not want spots to be predicted as class -1
         threshold_confidence_old: float = self.threshold_confidence
         self.local_classifier.set_threshold_confidence(0.0)
-        confidence_premapping: NDArray[_np.float_] = _np.zeros(
+        confidence_premapping: _NDArray[_np.float_] = _np.zeros(
             shape=(self.adata_spatial.shape[0], len(self.local_classifier.classes)),
         )
         for i_batch in tqdm(
@@ -287,13 +291,13 @@ class SpatialHandler:
             ncols=60,
         ):
             # Get adjacent neighbors
-            ixs_adj: NDArray[_np.int_] = self._find_adjacentOfOneSpot_spotIds(i_spot)
+            ixs_adj: _NDArray[_np.int_] = self._find_adjacentOfOneSpot_spotIds(i_spot)
             # Excluding self
             ixs_adj = _np.array(list(set(ixs_adj) - {i_spot}))
             if len(ixs_adj) == 0:  # if no neighbors, skip
                 continue
             # Extract confidences
-            confidences_adj: NDArray[_np.float_] = self.adata_spatial.obsm[
+            confidences_adj: _NDArray[_np.float_] = self.adata_spatial.obsm[
                 "confidence_premapping1"
             ][ixs_adj, :]
             # If confident enough, skip
@@ -321,7 +325,7 @@ class SpatialHandler:
     def _aggregate_spots_given_filtration(
         self,
         idx_centroid: int,
-    ) -> NDArray:
+    ) -> _NDArray:
         """Returns a 1d-array of counts of genes.
         Load from cache.
         """
@@ -329,8 +333,8 @@ class SpatialHandler:
 
     def _compute_confidence_of_filtration(
         self,
-        idx_centroids: NDArray[_np.int_],
-    ) -> NDArray[_np.float_]:
+        idx_centroids: _NDArray[_np.int_],
+    ) -> _NDArray[_np.float_]:
         """Calculate confidences of filtrations to each class,
         EXCLUDING the negative control, if exists.
         Return an idx-by-class 2d-array."""
@@ -341,7 +345,7 @@ class SpatialHandler:
                 self.cache_aggregated_counts[idx, :] = self.adata_spatial.X[
                     idx, :
                 ].copy()
-        probas: NDArray[_np.float_] = self.local_classifier.predict_proba(
+        probas: _NDArray[_np.float_] = self.local_classifier.predict_proba(
             X=_to_array(self.cache_aggregated_counts[idx_centroids, :]),
             genes=self.adata_spatial.var.index,
         )
@@ -402,7 +406,7 @@ class SpatialHandler:
                     ],
                 ]
             )
-        probs: NDArray[_np.float_] = _np.array(probs_)
+        probs: _NDArray[_np.float_] = _np.array(probs_)
         probs /= _np.sum(probs_)
         # Select one randomly
         idx_selected = _np.random.choice(idxs_adjacent, p=probs)
@@ -417,10 +421,10 @@ class SpatialHandler:
 
     def _buildFiltration_addSpotsUntilConfident(
         self,
-        idx_centroids: NDArray[_np.int_],
+        idx_centroids: _NDArray[_np.int_],
         n_spots_add_per_step: int = 1,
         verbose: bool = True,
-    ) -> tuple[NDArray[_np.float_], NDArray[_np.int_], NDArray[_np.int_]]:
+    ) -> tuple[_NDArray[_np.float_], _NDArray[_np.int_], _NDArray[_np.int_]]:
         """Find many spots centered at idx_centroids that are confidently in a class.
 
         Update the self.filtrations, update the self.mask_newIds, self.confidences_new,
@@ -429,12 +433,12 @@ class SpatialHandler:
         Keeps building until max_spots_per_cell met.
         If reaches max_spots_per_cell and still not confident, that class_id is set to -1.
         """
-        labels: NDArray[_np.int_] = _np.full(
+        labels: _NDArray[_np.int_] = _np.full(
             shape=len(idx_centroids),
             fill_value=-1,
             dtype=int,
         )  # cell types assigned, -1 for not confident
-        confidences: NDArray[_np.float_] = _np.full(
+        confidences: _NDArray[_np.float_] = _np.full(
             shape=len(idx_centroids),
             fill_value=0.0,
             dtype=float,
@@ -556,7 +560,7 @@ class SpatialHandler:
             if len(available_spots) == 0:
                 tqdm.write("All spots queried.")
                 break
-            idx_centroids: NDArray[_np.int_] = _np.random.choice(
+            idx_centroids: _NDArray[_np.int_] = _np.random.choice(
                 a=available_spots,
                 size=min(n_parallel, len(available_spots)),
                 replace=False,
@@ -637,10 +641,10 @@ Coverage: {coverage*100:.2f}%
     def get_spatial_classes(
         self,
         return_string: bool = False,
-    ) -> NDArray[_np.int_] | NDArray[_np.str_]:
+    ) -> _NDArray[_np.int_] | _NDArray[_np.str_]:
         """Get an array of integers, corresponding to class ids of each old sample (spot). -1 for unassigned. Or if `return_string` is `True`, return an array of
         class names, and 'Undefined' for unassigned."""
-        res: NDArray[_np.int_] = _np.zeros(
+        res: _NDArray[_np.int_] = _np.zeros(
             shape=(self.adata_spatial.shape[0],), dtype=int
         )
         for i_sample in range(len(res)):
@@ -664,10 +668,10 @@ Coverage: {coverage*100:.2f}%
         """Plot classes of each spot. Classes sorted alphabetically."""
         import seaborn as sns
 
-        spatial_classes: NDArray[_np.str_] = self.get_spatial_classes(
+        spatial_classes: _NDArray[_np.str_] = self.get_spatial_classes(
             return_string=True
         )
-        hue_order: NDArray[_np.str_] = _np.sort(_np.unique(spatial_classes))
+        hue_order: _NDArray[_np.str_] = _np.sort(_np.unique(spatial_classes))
         if "Undefined" in hue_order:
             i_undefined: int = _np.where(hue_order == "Undefined")[0][0]
             hue_order = _np.append(_np.delete(hue_order, i_undefined), "Undefined")
@@ -689,3 +693,72 @@ Coverage: {coverage*100:.2f}%
             y=self.adata_spatial.obs["y"].values,
             hue=new_ids.astype(_np.str_),
         )
+
+
+# Utilities
+def cluster_spatial_domain(
+    coords: _NDArray[_np.float_],
+    cell_types: _NDArray[_np.str_],
+    radius_local: float = 10.0,
+    n_clusters: int = 9,
+) -> _NDArray[_np.int_]:
+    """
+    Cluster spatial spots into many domains based on
+    cell-tpye proportion.
+
+    Args:
+        coords: n x 2 array, each row indicating spot location.
+        cell_types: array of cell types of each spot.
+        radius_local: radius of sliding window to compute cell-type proportion.
+        n_clusters: number of clusters generated.
+
+    Return:
+        array of cluster indices in corresponding order.
+    """
+    # Validate params
+    n_samples: int = coords.shape[0]
+    assert n_samples == cell_types.shape[0]
+    assert coords.shape[1] == 2
+    assert len(coords.shape) == 2
+    assert len(cell_types.shape) == 1
+
+    # Create distance matrix
+    ckdtree = _cKDTree(coords)
+    dist_matrix: _dok_matrix = ckdtree.sparse_distance_matrix(
+        other=ckdtree,
+        max_distance=radius_local,
+        p=2,
+        output_type="dok_matrix",
+    )
+
+    # Create celltype-proportion observation matrix
+    celltypes_unique: _NDArray[_np.str_] = _np.sort(
+        _np.unique(cell_types)
+    )  # alphabetically sort
+    obs_matrix: _NDArray[_np.float_] = _np.zeros(
+        shape=(n_samples, cell_types.shape[0]),
+        dtype=float,
+    )
+    for i_sample in tqdm(
+        range(n_samples),
+        desc="Compute celltype proportions",
+        ncols=60,
+    ):
+        dist_nbors = _to_array(dist_matrix[i_sample, :], squeeze=True)
+        dist_nbors[i_sample] = 1.0
+        iloc_nbors = _np.where(dist_nbors > 0)[0]
+        ct_nbors = cell_types[iloc_nbors]
+        for i_ct, ct in enumerate(celltypes_unique):
+            obs_matrix[i_sample, i_ct] = (ct_nbors == ct).mean()
+
+    # Agglomerative cluster
+    Z = _linkage(
+        obs_matrix,
+        method="ward",
+    )
+    cluster_labels = _fcluster(
+        Z,
+        t=n_clusters,
+        criterion="maxclust",
+    )
+    return cluster_labels

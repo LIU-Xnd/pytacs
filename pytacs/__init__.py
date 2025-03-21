@@ -11,7 +11,7 @@
 # - Improved local classifier strategy - higher inferencing accuracy;
 
 
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 
 from .data import AnnDataPreparer, downsample_cells, compare_umap
 from .classifier import (
@@ -21,4 +21,4 @@ from .classifier import (
     CosineSimilarityClassifier,
     JaccardClassifier,
 )
-from .spatial import SpatialHandler
+from .spatial import SpatialHandler, cluster_spatial_domain

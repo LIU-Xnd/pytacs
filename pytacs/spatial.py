@@ -752,6 +752,7 @@ def cluster_spatial_domain(
             obs_matrix[i_sample, i_ct] = (ct_nbors == ct).mean()
 
     # Agglomerative cluster
+    tqdm.write("Agglomerative clustering ...")
     Z = _linkage(
         obs_matrix,
         method="ward",
@@ -761,4 +762,5 @@ def cluster_spatial_domain(
         t=n_clusters,
         criterion="maxclust",
     )
+    tqdm.write("Done.")
     return cluster_labels

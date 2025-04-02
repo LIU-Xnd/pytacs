@@ -19,7 +19,7 @@ from typing import Literal as _Literal
 from typing import Iterator as _Iterator
 
 from tqdm import tqdm as _tqdm
-from .utils import save_and_tidy_index as _save_and_tidy_index
+from .utils import reinit_index as _reinit_index
 from .utils import _UNDEFINED, _UndefinedType
 from .utils import to_array as _to_array
 from .utils import truncate_top_n as _truncate_top_n
@@ -30,26 +30,52 @@ from collections import Counter as _Counter
 
 
 class AnnDataPreparer:
-    """Prepare snRNA-seq and spatial transcriptomic data for pytacs.
-    Will check data requirements when initialized.
-    Will save properly transformed AnnData copies in self.sn_adata and
-     self.sp_adata.
-    The sn_adata is kept with only overlapped genes with sp_adata, which is
-     used for training local classifiers.
-    The sn_adata with simulated negative control samples is saved in
-     self.sn_adata_withNegativeControl.
+    """
+    Initializes an object for processing snRNA-seq and spatial transcriptomic data
+    for PyTACS. This method ensures that the input AnnData objects meet required
+    conditions and applies transformations as needed.
+
+    Upon initialization:
+    - Copies of `sn_adata` and `sp_adata` are stored in `self.sn_adata` and `self.sp_adata`.
+    - `sn_adata` is filtered to retain only genes that overlap with `sp_adata`, as these
+      are used to train local classifiers.
+    - If `sn_colname_celltype` differs from `"cell_type"`, it is renamed accordingly.
+    - If `sp_obsmname_xycoords` differs from `"spatial"`, it is renamed accordingly.
+    - If the number of overlapping genes is below `overlapped_genes_warning`, a warning
+      message is printed.
 
     Args:
-        sn_adata (_AnnData): snRNA-seq (or scRNA-seq) AnnData (scanpy object)
-        sp_adata (_AnnData): spatial transcriptomic AnnData (scanpy object)
+        sn_adata (_AnnData, optional): Single-nucleus or single-cell RNA-seq AnnData object
+            (Scanpy object). Used to train local classifiers. Defaults to None.
+        sp_adata (_AnnData, optional): Spatial transcriptomic AnnData object (Scanpy object).
+            Defaults to None.
+        sn_colname_celltype (str, optional): Column name in `sn_adata.obs` that contains cell-type
+            annotations. If not `"cell_type"`, it will be renamed. Defaults to `"cell_type"`.
+        sp_obsmname_xycoords (str, optional): Key in `sp_adata.obsm` that stores spatial coordinates.
+            If not `"spatial"`, it will be renamed. Defaults to `"spatial"`.
+        overlapped_genes_warning (int, optional): Threshold below which a warning is printed
+            if the number of overlapping genes between `sn_adata` and `sp_adata` is too low.
+            Defaults to 10.
+
+    Raises:
+        AssertionError: If both `sn_adata` and `sp_adata` are None.
+        AssertionError: If provided `sn_adata` or `sp_adata` is not a valid `_AnnData` object.
+        AssertionError: If the structure of `sn_adata` or `sp_adata` is invalid (e.g., mismatch
+            between `X.shape` and index lengths).
+        AssertionError: If `sn_colname_celltype` is not found in `sn_adata.obs`.
+        AssertionError: If `sp_obsmname_xycoords` is not found in `sp_adata.obsm_keys()`.
+
+    Attributes:
+        sn_adata (_AnnData): Processed `sn_adata` with only overlapping genes retained.
+        sp_adata (_AnnData): Copied and preprocessed `sp_adata`.
+        downsampled_adata (_AnnData | _UndefinedType): Placeholder for downsampled data.
     """
 
     def __repr__(self) -> str:
         return f"""--- AnnDataPreparer (pytacs) ---
 - sn_adata: {self.sn_adata}
 - sp_adata: {self.sp_adata}
-- sn_adata_withNegativeControl: {self.sn_adata_withNegativeControl}
-- sn_adata_downsampledFromSpaAdata: {self.sn_adata_downsampledFromSpAdata}
+- downsampled_adata: {self.downsampled_adata}
 --- --- --- --- ---
 """
 
@@ -58,23 +84,55 @@ class AnnDataPreparer:
         sn_adata: _AnnData | None = None,
         sp_adata: _AnnData | None = None,
         sn_colname_celltype: str = "cell_type",
-        sp_colnames_x_and_y: tuple[str, str] = ("x", "y"),
+        sp_obsmname_xycoords: str = "spatial",
         overlapped_genes_warning: int = 10,
     ):
-        """Prepare snRNA-seq and spatial transcriptomic data for pytacs.
-        Will check data requirements when initialized.
-        Will save properly transformed AnnData copies in self.sn_adata and self.sp_adata.
-        The sn_adata is kept with only overlapped genes with sp_adata, which is used
-         for training local classifiers (but we recommend using
-         self.sn_adata_withNegativeControl for training).
-        The sn_adata with simulated negative control samples is saved in self.sn_adata_withNegativeControl.
+        """
+        Initializes an object for processing snRNA-seq and spatial transcriptomic data
+        for PyTACS. This method ensures that the input AnnData objects meet required
+        conditions and applies transformations as needed.
+
+        Upon initialization:
+        - Copies of `sn_adata` and `sp_adata` are stored in `self.sn_adata` and `self.sp_adata`.
+        - `sn_adata` is filtered to retain only genes that overlap with `sp_adata`, as these
+        are used to train local classifiers.
+        - If `sn_colname_celltype` differs from `"cell_type"`, it is renamed accordingly.
+        - If `sp_obsmname_xycoords` differs from `"spatial"`, it is renamed accordingly.
+        - If the number of overlapping genes is below `overlapped_genes_warning`, a warning
+        message is printed.
 
         Args:
-            sn_adata (_AnnData): snRNA-seq (or scRNA-seq) AnnData (scanpy object)
-            sp_adata (_AnnData): spatial transcriptomic AnnData (scanpy object)
+            sn_adata (_AnnData, optional): Single-nucleus or single-cell RNA-seq AnnData object
+                (Scanpy object). Used to train local classifiers. Defaults to None.
+            sp_adata (_AnnData, optional): Spatial transcriptomic AnnData object (Scanpy object).
+                Defaults to None.
+            sn_colname_celltype (str, optional): Column name in `sn_adata.obs` that contains cell-type
+                annotations. If not `"cell_type"`, it will be renamed. Defaults to `"cell_type"`.
+            sp_obsmname_xycoords (str, optional): Key in `sp_adata.obsm` that stores spatial coordinates.
+                If not `"spatial"`, it will be renamed. Defaults to `"spatial"`.
+            overlapped_genes_warning (int, optional): Threshold below which a warning is printed
+                if the number of overlapping genes between `sn_adata` and `sp_adata` is too low.
+                Defaults to 10.
+
+        Raises:
+            AssertionError: If both `sn_adata` and `sp_adata` are None.
+            AssertionError: If provided `sn_adata` or `sp_adata` is not a valid `_AnnData` object.
+            AssertionError: If the structure of `sn_adata` or `sp_adata` is invalid (e.g., mismatch
+                between `X.shape` and index lengths).
+            AssertionError: If `sn_colname_celltype` is not found in `sn_adata.obs`.
+            AssertionError: If `sp_obsmname_xycoords` is not found in `sp_adata.obsm_keys()`.
+
+        Attributes:
+            sn_adata (_AnnData): Processed `sn_adata` with only overlapping genes retained.
+            sp_adata (_AnnData): Copied and preprocessed `sp_adata`.
+            downsampled_adata (_AnnData | _UndefinedType): Placeholder for downsampled data.
         """
         # Checklist
-        assert isinstance(sn_adata, _AnnData) or isinstance(sp_adata, _AnnData)
+        assert not (sn_adata is None and sp_adata is None)
+        if sn_adata is not None:
+            assert isinstance(sn_adata, _AnnData)
+        if sp_adata is not None:
+            assert isinstance(sp_adata, _AnnData)
         sn_adata_copy: _AnnData | _UndefinedType = _UNDEFINED
         sp_adata_copy: _AnnData | _UndefinedType = _UNDEFINED
         if sn_adata is not None:
@@ -87,7 +145,7 @@ class AnnDataPreparer:
                 continue
             assert adata_i.X.shape[0] == len(adata_i.obs.index)
             assert adata_i.X.shape[1] == len(adata_i.var.index)
-            _save_and_tidy_index(adata_i)
+            _reinit_index(adata_i)
             if not isinstance(adata_i.X, _csr_matrix):
                 adata_i.X = _csr_matrix(adata_i.X)
         if isinstance(sn_adata_copy, _AnnData):
@@ -103,15 +161,11 @@ class AnnDataPreparer:
                     ].copy()
 
         if isinstance(sp_adata_copy, _AnnData):
-            assert len(sp_colnames_x_and_y) == 2
-            sp_names_standard = ("x", "y")
-            for i_name, sp_name in enumerate(sp_colnames_x_and_y):
-                assert sp_name in sp_adata.obs.columns
-                if sp_name != sp_names_standard[i_name]:
-                    sp_adata_copy.obs[sp_names_standard[i_name]] = sp_adata_copy.obs[
-                        sp_name
-                    ].copy()
-                    del sp_adata_copy.obs[sp_name]
+            assert sp_obsmname_xycoords in sp_adata_copy.obsm_keys()
+
+            if sp_obsmname_xycoords != "spatial":
+                sp_adata_copy.obsm["spatial"] = sp_adata_copy.obsm[sp_obsmname_xycoords]
+                del sp_adata_copy.obsm[sp_obsmname_xycoords]
 
         if isinstance(sn_adata, _AnnData) and isinstance(sp_adata, _AnnData):
             overlapped_genes: list[str] = list(
@@ -127,120 +181,64 @@ class AnnDataPreparer:
         else:
             self.sn_adata: _AnnData = sn_adata_copy
         self.sp_adata: _AnnData = sp_adata_copy
-        self.sn_adata_withNegativeControl: _AnnData | _UndefinedType = _UNDEFINED
-        self.sn_adata_downsampledFromSpAdata: _AnnData | _UndefinedType = _UNDEFINED
+        self.downsampled_adata: _AnnData | _UndefinedType = _UNDEFINED
         return
-
-    def simulate_negative_control(
-        self,
-        ratio_samplingFrom: float = 0.1,
-        ratio_mask: float = 0.3,
-        negative_samples_proportion: float = 0.5,  # (0 to 1, exclusive)
-        update_self: bool = True,
-    ) -> _AnnData:
-        """Simulate negative control samples.
-
-        Args:
-            ratio_samplingFrom (float, optional): sampling from the least (this ratio * n_samples)
-             expressed samples for each gene (0 to 1, supposedly exclusive). Defaults to 0.1.
-            ratio_mask (float, optional): this much ratio of sampled expression values
-             are randomly set to 0.
-             Supposedly 0 to 1, exclusive. Defaults to 0.3.
-            negative_samples_proportion (float, optional): to generate this much proportion of negative
-             control samples (0 to 1, exclusive). Defaults to 0.5.
-            update_self (bool, optional): whether to update self.sn_adata_withNegativeControl with this result.
-             Defaults to True.
-
-        Returns:
-            _AnnData: AnnData with the old and newly generated (negative control) samples, whose
-             .obs['cell_type'] are '__NegativeControl'.
-        """
-        # negative_samples_proportion = n_new / (n_old + n_new) = 1 - n_old / (n_old + n_new)
-        #  -> n_new = n_old * ((1/(1-negative_samples_proportion)) - 1) =: n_old * folds_newToOld
-        assert 0 < negative_samples_proportion < 1
-        folds_newToOld = (1 / (1 - negative_samples_proportion)) - 1
-        n_old = self.sn_adata.X.shape[0]
-        n_new = int(_np.ceil(n_old * folds_newToOld))
-        n_samplingFrom = int(_np.ceil(ratio_samplingFrom * n_old))
-        X_old: _np.ndarray = _to_array(self.sn_adata.X)
-        X_extra: _np.ndarray = _np.zeros(shape=(n_new, X_old.shape[1]), dtype=int)
-        for i_gene in range(X_old.shape[1]):
-            # Select the least n_samplingFrom expressed samples
-            lowly_expressed = _np.sort(X_old[:, i_gene])[:n_samplingFrom].max()
-            X_extra[:, i_gene] = (
-                _np.random.random(size=(X_extra.shape[0],)) * lowly_expressed
-            )
-
-        icols_tozero = _np.random.randint(
-            0,
-            X_extra.shape[1],
-            size=int(ratio_mask * X_extra.shape[0] * X_extra.shape[1]),
-        )
-        irows_tozero = _np.random.randint(
-            0, X_extra.shape[0], size=icols_tozero.shape[0]
-        )
-
-        X_extra[irows_tozero, icols_tozero] = 0
-
-        sn_adata_withNegativeControl = _AnnData(
-            X=_csr_matrix(_np.concatenate([X_old, X_extra], axis=0)),
-            obs=_pd.DataFrame(
-                data=_pd.concat(
-                    [
-                        self.sn_adata.obs["cell_type"],
-                        _pd.Series(
-                            ["__NegativeControl" for _ in range(X_extra.shape[0])]
-                        ),
-                    ]
-                ).values,
-                index=_pd.Series(
-                    _np.arange(X_old.shape[0] + X_extra.shape[0]), dtype=str
-                ),
-                columns=["cell_type"],
-            ),
-            var=self.sn_adata.var.copy(),
-        )
-        if update_self:
-            self.sn_adata_withNegativeControl = sn_adata_withNegativeControl
-        return sn_adata_withNegativeControl
 
     def filter_genes_highly_variable(
         self,
         min_counts: int = 3,
         n_top_genes: int = 3000,
     ) -> None:
-        """Filter on genes of sn_adata, keeping only highly variable genes.
+        """
+        Filters `sn_adata` to retain only highly variable genes.
 
-        If you want to apply it on modified sn_adata, e.g., sn_adata_downsampledFromSpAdata
-        or sn_adata_withNegativeControl, you'd better backup current object and re-assign
-        the corresponding modified sn_adata to this object's .sn_adata as a workaround.
+        This method:
+        1. Stores raw counts in `layers["counts"]`.
+        2. Filters genes based on `min_counts`.
+        3. Normalizes total counts to 10,000 per cell.
+        4. Applies log1p transformation and stores in `layers["log1p"]`.
+        5. Identifies and retains only the top `n_top_genes` most variable genes.
+        6. Restores raw counts back to `.X`.
 
-        First back up raw counts into layers['counts'],
-        then filter genes, normalize, logarithmize, and find highly variable genes.
-        Finally saves this expression matrix into layers['log1p'] and activate back raw counts,
-        and only keeps highly variable genes.
+        Args:
+            min_counts (int, optional): Minimum counts required to retain a gene. Defaults to 3.
+            n_top_genes (int, optional): Number of highly variable genes to keep. Defaults to 3000.
 
-        For more preprocessing please use scanpy directly."""
-        assert isinstance(self.sn_adata, _AnnData)
+        Raises:
+            AssertionError: If `sn_adata` is not an instance of `_AnnData`.
+
+        Notes:
+            - If you need to apply this to a modified version of `sn_adata`
+            (e.g., `downsampled_adata`), you should first back up the object and
+            assign the modified `sn_adata` before calling this method.
+            - For advanced preprocessing, use `scanpy` directly.
+        """
+        assert isinstance(
+            self.sn_adata, _AnnData
+        ), "sn_adata must be an AnnData object."
+
+        print("Backing up raw counts...")
         self.sn_adata.layers["counts"] = self.sn_adata.X.copy()
-        _sc.pp.filter_genes(
-            data=self.sn_adata,
-            min_counts=min_counts,
-            inplace=True,
-        )
-        _sc.pp.normalize_total(
-            adata=self.sn_adata,
-            target_sum=1e4,
-            inplace=True,
-        )
+
+        print(f"Filtering genes with min_counts >= {min_counts}...")
+        _sc.pp.filter_genes(self.sn_adata, min_counts=min_counts, inplace=True)
+
+        print("Normalizing total counts to 10,000 per cell...")
+        _sc.pp.normalize_total(self.sn_adata, target_sum=1e4, inplace=True)
+
+        print("Applying log1p transformation...")
         _sc.pp.log1p(self.sn_adata)
-        _sc.pp.highly_variable_genes(
-            adata=self.sn_adata,
-            n_top_genes=n_top_genes,
-            subset=True,
-        )
         self.sn_adata.layers["log1p"] = self.sn_adata.X.copy()
+
+        print(f"Selecting top {n_top_genes} highly variable genes...")
+        _sc.pp.highly_variable_genes(
+            self.sn_adata, n_top_genes=n_top_genes, subset=True
+        )
+
+        print("Restoring raw counts...")
         self.sn_adata.X = self.sn_adata.layers["counts"].copy()
+
+        print("Highly variable gene filtering completed.")
         return
 
     def sample_signatures_logl1_local_maxima(
@@ -268,7 +266,7 @@ class AnnDataPreparer:
         Finally, it performs clustering to get several
         clusters as reference signatures to train downstream local classifiers.
 
-        Update self.sn_adata_downsampledFromSpAdata.
+        Update self.downsampled_adata
             .obs:
                 ['cluster']: 'cluster 1', 'cluster 2', ...
                 ['logl1']: 3.68, 4.45, ...  # original logl1 of target, not binned
@@ -353,7 +351,7 @@ class AnnDataPreparer:
             ).reshape(-1)
             out_matrix[i_sampling, :] = expr_vector
 
-        self.sn_adata_downsampledFromSpAdata = _AnnData(
+        self.downsampled_adata = _AnnData(
             X=_csr_matrix(out_matrix),
             obs=_pd.DataFrame(
                 {
@@ -374,24 +372,18 @@ class AnnDataPreparer:
 
         # Cluster
         _tqdm.write("Clustering ...")
-        self.sn_adata_downsampledFromSpAdata.layers["counts"] = (
-            self.sn_adata_downsampledFromSpAdata.X.copy()
-        )
-        _sc.pp.normalize_total(self.sn_adata_downsampledFromSpAdata, target_sum=1e4)
-        _sc.pp.log1p(self.sn_adata_downsampledFromSpAdata)
-        _sc.pp.pca(self.sn_adata_downsampledFromSpAdata)
-        X_pca = self.sn_adata_downsampledFromSpAdata.obsm["X_pca"]
+        self.downsampled_adata.layers["counts"] = self.downsampled_adata.X.copy()
+        _sc.pp.normalize_total(self.downsampled_adata, target_sum=1e4)
+        _sc.pp.log1p(self.downsampled_adata)
+        _sc.pp.pca(self.downsampled_adata)
+        X_pca = self.downsampled_adata.obsm["X_pca"]
         Z = _linkage(X_pca, method="ward")
         clusters_labels = _fcluster(Z, t=n_clusters, criterion="maxclust")
-        self.sn_adata_downsampledFromSpAdata.obs[colname_cluster] = [
+        self.downsampled_adata.obs[colname_cluster] = [
             f"Cluster {i}" for i in clusters_labels
         ]
-        self.sn_adata_downsampledFromSpAdata.layers["log1p"] = (
-            self.sn_adata_downsampledFromSpAdata.X.copy()
-        )
-        self.sn_adata_downsampledFromSpAdata.X = (
-            self.sn_adata_downsampledFromSpAdata.layers["counts"]
-        )
+        self.downsampled_adata.layers["log1p"] = self.downsampled_adata.X.copy()
+        self.downsampled_adata.X = self.downsampled_adata.layers["counts"]
         _tqdm.write("Done.")
         return
 
@@ -413,7 +405,7 @@ class AnnDataPreparer:
         Finally, it performs clustering to get several
         clusters as reference signatures to train downstream local classifiers.
 
-        Update self.sn_adata_downsampledFromSpAdata.
+        Update self.downsampled_adata.
             .obs:
                 ['cluster']: 'cluster 1', 'cluster 2', ...
                 ...
@@ -483,7 +475,7 @@ class AnnDataPreparer:
             ).reshape(-1)
             out_matrix[i_sampling, :] = expr_vector
 
-        self.sn_adata_downsampledFromSpAdata = _AnnData(
+        self.downsampled_adata = _AnnData(
             X=_csr_matrix(out_matrix),
             obs=_pd.DataFrame(
                 {
@@ -502,24 +494,18 @@ class AnnDataPreparer:
 
         # Cluster
         _tqdm.write("Clustering ...")
-        self.sn_adata_downsampledFromSpAdata.layers["counts"] = (
-            self.sn_adata_downsampledFromSpAdata.X.copy()
-        )
-        _sc.pp.normalize_total(self.sn_adata_downsampledFromSpAdata, target_sum=1e4)
-        _sc.pp.log1p(self.sn_adata_downsampledFromSpAdata)
-        _sc.pp.pca(self.sn_adata_downsampledFromSpAdata)
-        X_pca = self.sn_adata_downsampledFromSpAdata.obsm["X_pca"]
+        self.downsampled_adata.layers["counts"] = self.downsampled_adata.X.copy()
+        _sc.pp.normalize_total(self.downsampled_adata, target_sum=1e4)
+        _sc.pp.log1p(self.downsampled_adata)
+        _sc.pp.pca(self.downsampled_adata)
+        X_pca = self.downsampled_adata.obsm["X_pca"]
         Z = _linkage(X_pca, method="ward")
         clusters_labels = _fcluster(Z, t=n_clusters, criterion="maxclust")
-        self.sn_adata_downsampledFromSpAdata.obs[colname_cluster] = [
+        self.downsampled_adata.obs[colname_cluster] = [
             f"Cluster {i}" for i in clusters_labels
         ]
-        self.sn_adata_downsampledFromSpAdata.layers["log1p"] = (
-            self.sn_adata_downsampledFromSpAdata.X.copy()
-        )
-        self.sn_adata_downsampledFromSpAdata.X = (
-            self.sn_adata_downsampledFromSpAdata.layers["counts"]
-        )
+        self.downsampled_adata.layers["log1p"] = self.downsampled_adata.X.copy()
+        self.downsampled_adata.X = self.downsampled_adata.layers["counts"]
         _tqdm.write("Done.")
         return
 
@@ -542,30 +528,25 @@ class AnnDataPreparer:
 
         When clusters are too few, jaccard might fail."""
         assert method in ["SVM", "cosine", "jaccard"]
-        assert isinstance(self.sn_adata_downsampledFromSpAdata, _AnnData)
+        assert isinstance(self.downsampled_adata, _AnnData)
         assert isinstance(self.sn_adata, _AnnData)
         assert colname_type_sn_adata in self.sn_adata.obs.columns
-        assert (
-            colname_cluster_downsampled
-            in self.sn_adata_downsampledFromSpAdata.obs.columns
-        )
-        if new_colname_match in self.sn_adata_downsampledFromSpAdata.obs.columns:
+        assert colname_cluster_downsampled in self.downsampled_adata.obs.columns
+        if new_colname_match in self.downsampled_adata.obs.columns:
             _tqdm.write(
                 f"Warning: {new_colname_match} already in sn_adata_downsampledFromSpAdata.obs!"
             )
         overlapped_genes = _np.array(
             list(
                 set(self.sn_adata.var.index.values)
-                & set(self.sn_adata_downsampledFromSpAdata.var.index.values)
+                & set(self.downsampled_adata.var.index.values)
             )
         )
         if len(overlapped_genes) < 100:
             _tqdm.write(f"Warning: overlapped genes < 100 might be too few!")
 
         sn_adata = self.sn_adata[:, overlapped_genes].copy()
-        sn_adata_downsampled = self.sn_adata_downsampledFromSpAdata[
-            :, overlapped_genes
-        ].copy()
+        sn_adata_downsampled = self.downsampled_adata[:, overlapped_genes].copy()
         # Compute type-wise mean
         celltypes = _np.unique(sn_adata.obs[colname_type_sn_adata])
         cellclusters = _np.unique(sn_adata_downsampled.obs[colname_cluster_downsampled])
@@ -648,7 +629,7 @@ class AnnDataPreparer:
         for iloc_type, iloc_clt in enumerate(iloc_matched_clusters):
             df_match_bool.iloc[iloc_type, iloc_clt] = True
 
-        self.sn_adata_downsampledFromSpAdata.obs[new_colname_match] = ""
+        self.downsampled_adata.obs[new_colname_match] = ""
         new_annotations_mapping = dict()
         for clt in cellclusters:
             ct_matched: list[str] = list(
@@ -658,17 +639,14 @@ class AnnDataPreparer:
                 new_annotations_mapping[clt] = new_name_novel
             else:
                 new_annotations_mapping[clt] = sep_for_multiple_types.join(ct_matched)
-        new_annotations = self.sn_adata_downsampledFromSpAdata.obs[
+        new_annotations = self.downsampled_adata.obs[
             colname_cluster_downsampled
         ].values.copy()
         for clt in _tqdm(cellclusters, desc="Record in .obs", ncols=60):
             new_annotations[
-                self.sn_adata_downsampledFromSpAdata.obs[
-                    colname_cluster_downsampled
-                ].values
-                == clt
+                self.downsampled_adata.obs[colname_cluster_downsampled].values == clt
             ] = new_annotations_mapping[clt]
-        self.sn_adata_downsampledFromSpAdata.obs[new_colname_match] = new_annotations
+        self.downsampled_adata.obs[new_colname_match] = new_annotations
         _tqdm.write(f'Annotations written in .obs["{new_colname_match}"].')
         return (df_match, df_match_bool)
 

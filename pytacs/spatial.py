@@ -1,4 +1,3 @@
-from typing import Literal
 from scanpy import AnnData as _AnnData
 import numpy as _np
 from numpy.typing import NDArray as _NDArray
@@ -15,7 +14,7 @@ from .utils import to_array as _to_array
 from .utils import _UNDEFINED, _UndefinedType
 
 # from multiprocess.pool import Pool as _Pool
-from tqdm import tqdm
+from tqdm import tqdm as _tqdm
 
 # from .utils import deepcopy_dict as _deepcopy_dict
 
@@ -109,10 +108,6 @@ class SpatialHandler:
         return self.local_classifier.threshold_confidence
 
     @property
-    def has_negative_control(self) -> bool:
-        return self.local_classifier.has_negative_control
-
-    @property
     def filtrations(self) -> dict:
         """Return a copy of filtrations."""
         copy_ = dict()
@@ -167,7 +162,6 @@ class SpatialHandler:
 - threshold_adjacent: {self.threshold_adjacent}
 - local_classifier: {self.local_classifier}
     + threshold_confidence: {self.threshold_confidence}
-    + has_negative_control: {self.has_negative_control}
 - max_spots_per_cell: {self.max_spots_per_cell}
 - scale_rbf: {self.scale_rbf}
 - pre-mapped: {self._premapped}
@@ -242,7 +236,7 @@ class SpatialHandler:
         confidence_premapping: _NDArray[_np.float_] = _np.zeros(
             shape=(self.adata_spatial.shape[0], len(self.local_classifier.classes)),
         )
-        for i_batch in tqdm(
+        for i_batch in _tqdm(
             range(confidence_premapping.shape[0] // n_parallel + 1),
             desc="1st premapping",
             ncols=60,
@@ -257,9 +251,7 @@ class SpatialHandler:
                 X=_to_array(self.adata_spatial.X[i_samples, :]),
                 genes=self.adata_spatial.var.index,
             )
-        if self.has_negative_control:
-            confidence_premapping = confidence_premapping[:, :-1]
-            # only preserves real classes (ids).
+
         self.adata_spatial.obsm["confidence_premapping1"] = confidence_premapping
 
         # <<< Reset the confidence threshold
@@ -285,7 +277,7 @@ class SpatialHandler:
             "confidence_premapping1"
         ].copy()
 
-        for i_spot in tqdm(
+        for i_spot in _tqdm(
             range(self.adata_spatial.shape[0]),
             desc="2nd premapping",
             ncols=60,
@@ -335,8 +327,7 @@ class SpatialHandler:
         self,
         idx_centroids: _NDArray[_np.int_],
     ) -> _NDArray[_np.float_]:
-        """Calculate confidences of filtrations to each class,
-        EXCLUDING the negative control, if exists.
+        """Calculate confidences of filtrations to each class
         Return an idx-by-class 2d-array."""
         # Collect filtrations
         for idx in idx_centroids:
@@ -349,9 +340,6 @@ class SpatialHandler:
             X=_to_array(self.cache_aggregated_counts[idx_centroids, :]),
             genes=self.adata_spatial.var.index,
         )
-        # Only keeps positive classes
-        if self.has_negative_control:
-            probas = probas[:-1]
         return probas
 
     def _buildFiltration_addOneSpot(self, idx_centroid, verbose=True) -> int:
@@ -373,7 +361,7 @@ class SpatialHandler:
         # Stop if max_spots_per_cell reached
         if len(self._filtrations[idx_centroid]) >= self.max_spots_per_cell:
             if verbose:
-                tqdm.write(
+                _tqdm.write(
                     f"Warning: reaches max_spots_per_cell {
                         self.max_spots_per_cell}"
                 )
@@ -384,7 +372,7 @@ class SpatialHandler:
         )
         if len(idxs_adjacent) == 0:
             if verbose:
-                tqdm.write(
+                _tqdm.write(
                     f"Warning: no adjacent spots found! Check threshold_adjacent {
                         self.threshold_adjacent}"
                 )
@@ -445,7 +433,7 @@ class SpatialHandler:
         )
 
         where_running = _np.arange(len(labels))  # Running terms
-        for i_step_add_spot in tqdm(
+        for i_step_add_spot in _tqdm(
             range(self.max_spots_per_cell // n_spots_add_per_step + 1),
             desc="Building a batch of cells",
             ncols=60,
@@ -562,7 +550,7 @@ class SpatialHandler:
         queried_spotIds = set()
         for i_iter in range(max_iter):
             if verbose:
-                tqdm.write(f"Iter {i_iter+1}:")
+                _tqdm.write(f"Iter {i_iter+1}:")
             available_spots: list[int] = list(
                 (
                     set(_np.arange(self.adata_spatial.shape[0]))
@@ -572,7 +560,7 @@ class SpatialHandler:
                 - queried_spotIds
             )
             if len(available_spots) == 0:
-                tqdm.write("All spots queried.")
+                _tqdm.write("All spots queried.")
                 break
             idx_centroids: _NDArray[_np.int_] = _np.random.choice(
                 a=available_spots,
@@ -591,22 +579,22 @@ class SpatialHandler:
                     continue
                 class_count[label] = class_count.get(label, 0) + 1
             if verbose:
-                tqdm.write(
+                _tqdm.write(
                     f"Cell {idx_centroids[0]}, ... | Confidence: {confs[0]:.3e}, ... | Confident total: {confident_count} | class: {labels[0]}, ..."
                 )
-                tqdm.write(f"Classes total: {class_count}")
+                _tqdm.write(f"Classes total: {class_count}")
             coverage = (self.mask_newIds > -1).sum() / len(self.mask_newIds)
             if verbose:
-                tqdm.write(f"Coverage: {coverage*100:.2f}%")
+                _tqdm.write(f"Coverage: {coverage*100:.2f}%")
             if coverage >= coverage_to_stop:
                 break
         else:
             if warnings:
-                tqdm.write(f"Reaches max_iter {max_iter}!")
+                _tqdm.write(f"Reaches max_iter {max_iter}!")
         if verbose:
-            tqdm.write("Done.")
+            _tqdm.write("Done.")
         if print_summary:
-            tqdm.write(
+            _tqdm.write(
                 f"""--- Summary ---
 Queried {len(queried_spotIds)} spots, of which {confident_count} made up confident single cells.
 Classes total: {class_count}
@@ -753,7 +741,7 @@ def cluster_spatial_domain(
         shape=(n_samples, cell_types.shape[0]),
         dtype=float,
     )
-    for i_sample in tqdm(
+    for i_sample in _tqdm(
         range(n_samples),
         desc="Compute celltype proportions",
         ncols=60,
@@ -766,7 +754,7 @@ def cluster_spatial_domain(
             obs_matrix[i_sample, i_ct] = (ct_nbors == ct).mean()
 
     # Agglomerative cluster
-    tqdm.write("Agglomerative clustering ...")
+    _tqdm.write("Agglomerative clustering ...")
     Z = _linkage(
         obs_matrix,
         method="ward",
@@ -776,5 +764,5 @@ def cluster_spatial_domain(
         t=n_clusters,
         criterion="maxclust",
     )
-    tqdm.write("Done.")
+    _tqdm.write("Done.")
     return cluster_labels

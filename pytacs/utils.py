@@ -2,7 +2,10 @@ import numpy as _np
 from scanpy import AnnData as _AnnData
 from scipy.sparse import csr_matrix as _csr_matrix
 from scipy.sparse import dok_matrix as _dok_matrix
+from scipy.sparse import issparse as _issparse
 from numpy import matrix as _matrix
+from numpy.typing import NDArray as _NDArray
+from typing import Iterator as _Iterator
 
 
 # Placeholder type
@@ -50,53 +53,39 @@ def print_newlines(*args, sep: str = "\n") -> None:
 
 
 # >>> --- Reshaping operations ---
-def _indices_of_ls1ElementInLst2(lst1: list, lst2: list) -> list[int]:
-    """Returns a list whose elements are integers, where:
-     the k-th integer are the index of lst1's k-th element in lst2,
-     and if lst1's k-th element is not in lst2, the returned k-th element is -1.
-    For example:
-     input: lst1=[2,4,5,6,7], lst2=[5,4,7,3,2,1]
-     output: [4,1,0,-1,2]"""
-    return [lst2.index(ele) if ele in lst2 else -1 for ele in lst1]
 
 
-def subCountMatrix_genes2InGenes1(
-    X: _np.ndarray, genes1: list[str], genes2: list[str]
+def find_indices(lst1: _Iterator, lst2: _Iterator) -> _NDArray[_np.int_]:
+    """Returns an array of indices where elements of lst1 appear in lst2, or -1 if not found.
+
+    Example:
+        ls1 = np.array([2,4,5,6,7])
+        ls2 = np.array([5,4,7,3,2,0])
+        iloc_2to1 = find_indices(ls1, ls2)
+        # We have
+        ls2[iloc_2to1] == np.array([2,4,5,0,7])
+    """
+    index_map = {
+        val: idx for idx, val in enumerate(lst2)
+    }  # Create a mapping for fast lookup
+    return _np.array([index_map.get(ele, -1) for ele in lst1])
+
+
+def rearrange_count_matrix(
+    X: _np.ndarray, genes_X: _NDArray[_np.str_], genes_target: _NDArray[_np.str_]
 ) -> _np.ndarray:
-    """Select those genes in genes2 that appear in genes1 (order preserved as genes1).
-     RNA count of those genes in genes1 but do not appear in genes2 is set to 0.
-    X's columns correspond to genes2. They want reshaping into genes1.
-
-    This function is often used to unify the covariates so as to fit in a pretrained local
-     classifier.
-
-    Args:
-        X (ndarray): sample-by-gene count matrix.
-        genes1 (list[str]): a standard gene list, often a snRNA-seq gene list.
-        genes2 (list[str]): genes corresponding to X's columns. They want reshaping into genes1.
-
-    Return:
-        ndarray: a count matrix almost the same as X, but columns reshaped into genes1, and
-         counts of those genes which are absent in genes2 set to 0.
-
-    For example:
-        input:
-            X=[[...]] (n_samples * n_genes_sp, in this case, N * 4);
-            genes1=['Malat1', 'Cgnl1', 'Golga4'] (local classifier-learnt "snRNA" gene list);
-            genes2=['Cgnl1', 'Malat1', 'Otherfoo', 'Otherbar'] (spRNA-seq data, cols of X);
-        output:
-            [[..]] (n_samples * n_genes_sn, in this case, N * 3), whose columns are
-             ['Malat1', 'Cgnl1', 'Golga4'], where X's ['Golga4'] column is set to 0 due
-             to absence."""
-    idx_subgenes = _indices_of_ls1ElementInLst2(list(genes1), list(genes2))
-    # print(f"{len(idx_subgenes)=}")
-    return _np.concatenate(
-        [X, _np.zeros((X.shape[0], 1), dtype=int)],  # those not shown set to 0
-        axis=1,
-    )[:, _np.array(idx_subgenes)]
+    """Reshape X to match genes_target, setting absent gene counts to 0."""
+    idx_subgenes = find_indices(lst1=genes_target, lst2=genes_X)
+    X_rearranged = _np.zeros(
+        shape=(X.shape[0], len(genes_target)),
+        dtype=X.dtype,
+    )
+    valid_indices = idx_subgenes >= 0
+    X_rearranged[:, valid_indices] = X[:, idx_subgenes[valid_indices]]
+    return X_rearranged
 
 
-def save_and_tidy_index(
+def reinit_index(
     adata: _AnnData,
     colname_to_save_oldIndex: str = "old_index",
 ) -> None:
@@ -108,45 +97,69 @@ def save_and_tidy_index(
             f"Warning: {colname_to_save_oldIndex} already in obs! New name: {colname_to_save_oldIndex}_copy."
         )
         colname_to_save_oldIndex += "_copy"
-    adata.obs[colname_to_save_oldIndex] = adata.obs.index
+    adata.obs[colname_to_save_oldIndex] = adata.obs.index.values
     adata.obs.index = _np.arange(adata.obs.shape[0]).astype(str)
-    return None
+    return
 
 
 # --- Reshaping operations --- <<<
 
 
 def radial_basis_function(
-    location_vector: _np.ndarray,
+    location_vectors: _np.ndarray,
     centroid_vector: _np.ndarray | None = None,
     scale: float = 1.0,
-) -> float:
+) -> _NDArray[_np.float_]:
+    """
+    Computes the values of a multivariate Gaussian radial basis function (RBF) for a batch of vectors.
+
+    Args:
+        location_vectors (np.ndarray): An (N, D) array where each row is a D-dimensional input vector.
+        centroid_vector (np.ndarray | None, optional): The D-dimensional center of the RBF. Defaults to the origin.
+        scale (float, optional): The standard deviation (spread) of the RBF. Defaults to 1.0.
+
+    Returns:
+        np.ndarray: An (N,) array containing the RBF values for each input vector.
+    """
     if centroid_vector is None:
-        centroid_vector = _np.zeros((location_vector.shape[0],))
-    return (
-        1 / _np.power(2 * _np.pi * _np.power(scale, 2), location_vector.shape[0] / 2)
-    ) * _np.exp(
-        -_np.power(_np.linalg.norm(location_vector - centroid_vector), 2)
-        / (2 * _np.power(scale, 2))
-    )
+        centroid_vector = _np.zeros(
+            (1, location_vectors.shape[1])
+        )  # Shape (1, D) for broadcasting
+    scale_squared = scale**2
+    dim = location_vectors.shape[1]
+
+    coeff = 1 / ((2 * _np.pi * scale_squared) ** (dim / 2))
+    dist_squared = _np.sum((location_vectors - centroid_vector) ** 2, axis=1)
+    expo = -dist_squared / (2 * scale_squared)
+
+    return coeff * _np.exp(expo)
 
 
 def to_array(
     X: _np.ndarray | _csr_matrix | _dok_matrix | _matrix,
     squeeze: bool = False,
 ) -> _np.ndarray:
-    if isinstance(X, _csr_matrix) or isinstance(X, _dok_matrix):
+    """
+    Converts various matrix types (NumPy array, SciPy sparse matrices, or NumPy matrix) into a NumPy array.
+
+    Args:
+        X (np.ndarray | csr_matrix | dok_matrix | np.matrix): Input matrix to be converted.
+        squeeze (bool, optional): If True, the output array is flattened. Defaults to False.
+
+    Returns:
+        np.ndarray: The converted NumPy array.
+    """
+    if _issparse(X):
         X = X.toarray()
     elif isinstance(X, _matrix):
-        X = _np.array(X.tolist())
-    assert isinstance(X, _np.ndarray)
+        X = _np.asarray(X)
     if squeeze:
-        X = X.reshape(-1)
+        X = X.ravel().copy()
     return X
 
 
-def deepcopy_dict(d: dict[int, list]) -> dict:
-    return {k: v.copy() for k, v in d.items()}
+# def deepcopy_dict(d: dict[int, list]) -> dict:
+#     return {k: v.copy() for k, v in d.items()}
 
 
 def truncate_top_n(
@@ -154,13 +167,22 @@ def truncate_top_n(
     n_top: int,
     return_bools: bool = False,
 ) -> _np.ndarray:
-    assert len(arr.shape) == 1
-    ilocs_truncated = _np.argsort(arr)[::-1][:n_top]
-    res: _np.ndarray = _np.zeros(
-        shape=arr.shape,
-        dtype=arr.dtype,
-    )
+    """
+    Truncates the input array by setting all but the top `n_top` values to 0.
+
+    Args:
+        arr (np.ndarray): 1D input array.
+        n_top (int): Number of top values to retain (sorted in descending order).
+        return_bools (bool, optional): If True, returns a boolean array where True represents the top values.
+                                        Defaults to False, which returns a float array.
+
+    Returns:
+        np.ndarray: A 1D array where only the top `n_top` values are set to 1.0 (or True if `return_bools=True`).
+    """
+    assert arr.ndim == 1, "Input array must be 1D"
+
+    ilocs_truncated = _np.argsort(arr)[-n_top:][::-1]
+    res = _np.zeros_like(arr, dtype=_np.bool_ if return_bools else arr.dtype)
     res[ilocs_truncated] = 1.0
-    if return_bools:
-        res = _np.bool_(res)
+
     return res

@@ -12,15 +12,14 @@ from scipy.sparse import dok_matrix as _dok_matrix
 from scipy.spatial import cKDTree as _cKDTree
 from typing import Iterable, Literal
 from .utils import _UNDEFINED, _UndefinedType
-from .utils import subCountMatrix_genes2InGenes1 as _get_subCountMatrix
+from .utils import rearrange_count_matrix as _rearrange_count_matrix
 from .utils import to_array as _to_array
 from .utils import truncate_top_n as _truncate_top_n
 
 
 # >>> ---- Local Classifier ----
 class _LocalClassifier:
-    """This classifier would predict probabilities for each class, as well as
-     the negative-control class (the last class), if generated.
+    """This classifier would predict probabilities for each class
 
     .fit(), .predict(), and .predict_proba() are specially built, but
      often the last two methods are not to be called manually.
@@ -41,7 +40,6 @@ class _LocalClassifier:
         **kwargs,
     ):
         self._threshold_confidence: float = threshold_confidence
-        self._has_negative_control: bool = False
         self._genes: NDArray[_np.str_] | _UndefinedType = _UNDEFINED
         self._classes: NDArray[_np.str_] | _UndefinedType = _UNDEFINED
         return None
@@ -53,10 +51,6 @@ class _LocalClassifier:
     def set_threshold_confidence(self, value: float = 0.75):
         self._threshold_confidence = value
         return self
-
-    @property
-    def has_negative_control(self) -> bool:
-        return self._has_negative_control
 
     @property
     def genes(self) -> NDArray[_np.str_] | _UndefinedType:
@@ -102,9 +96,6 @@ class _LocalClassifier:
 
             colname_classes (str): the name of the column in .obs that
              indicates the cell types (classes).
-             Negative controls should be named '__NegativeControl' which is the
-             default name of negative controls generated
-             by pytacs.data.AnnDataPreparer.
 
         Return:
             dict(X: 2darray, y: array): data ready to train.
@@ -123,17 +114,6 @@ class _LocalClassifier:
         self._classes = _np.sort(
             _np.array((sn_adata.obs[colname_classes]).unique()).astype(str)
         )  # sorted alphabetically
-        # Move the __NegativeControl label to the end
-        if "__NegativeControl" in self._classes:
-            self._has_negative_control = True
-            self._classes = _np.concatenate(
-                [
-                    self._classes[self._classes != "__NegativeControl"],
-                    _np.array(["__NegativeControl"]),
-                ]
-            )
-        else:
-            self._has_negative_control = False
         # Prepare y: convert classNames into classIds
         class_ids: NDArray[_np.int_] = self.classNames_to_classIds(
             _np.array(sn_adata.obs[colname_classes]).astype(str)
@@ -178,7 +158,7 @@ class _LocalClassifier:
             genes_ = list(genes)
         assert len(genes_) == X.shape[1], "genes must be compatible with X.shape[1]"
         # Select those genes that appear in self._genes
-        X_new = _get_subCountMatrix(X, list(self._genes), genes_)
+        X_new = _rearrange_count_matrix(X, list(self._genes), genes_)
         # print(f"{X_new.shape=}")
         return {"X": X_new}
 
@@ -207,7 +187,6 @@ class _LocalClassifier:
 
         probas: NDArray | dict[str, _np.ndarray] = self.predict_proba(X, genes)
         assert isinstance(probas, _np.ndarray), ".predict_proba() needs overwriting!"
-        # Not considering negative controls.
         classes_pred = _np.argmax(probas, axis=1)
         probas_max = probas[_np.arange(probas.shape[0]), classes_pred]
         where_notConfident = probas_max < self.threshold_confidence
@@ -221,8 +200,7 @@ class _LocalClassifier:
 class SVM(_LocalClassifier):
     """Based on sklearn.svm.linearSVC (See relevant reference there),
      specially built for snRNA-seq data training.
-    This classifier would predict probabilities for each class, as well as
-     the negative-control class (the last class), if exists.
+    This classifier would predict probabilities for each class
     An OVR (One-versus-Rest) strategy is used.
 
     .fit(), .predict(), and .predict_proba() are specially built, but
@@ -298,8 +276,7 @@ class SVM(_LocalClassifier):
              .var, whose index indicates the genes used for training.
 
             colname_classes (str): the name of the column in .obs that
-             indicates the cell types (classes). Negative controls (if exist)
-             should be named "__NegativeControl".
+             indicates the cell types (classes).
 
         Return:
             self (model)."""
@@ -382,9 +359,7 @@ class GaussianNaiveBayes(_LocalClassifier):
     """Not Recommended.
 
     This classifier based on Gaussian Naive Bayes models would predict
-     probabilities for each class, as well as
-     the negative-control class (the last class, but not necessary),
-     if generated.
+     probabilities for each class.
 
     .fit(), .predict(), and .predict_proba() are specially built, but
      often the last two methods are not to be called manually.
@@ -480,9 +455,6 @@ class GaussianNaiveBayes(_LocalClassifier):
 
             colname_classes (str): the name of the column in .obs that
              indicates the cell types (classes).
-             Negative controls should be named '__NegativeControl' which is the
-             default name of negative controls generated
-             by pytacs.data.AnnDataPreparer.
 
         Return:
             self (Model): a trained model (self).
@@ -575,9 +547,7 @@ class GaussianNaiveBayes(_LocalClassifier):
 
 class QProximityClassifier(_LocalClassifier):
     """This classifier based on q-proximity confidence metric would predict
-     probabilities for each class, as well as
-     the negative-control class (the last class, but not necessary),
-     if generated.
+     probabilities for each class.
 
     .fit(), .predict(), and .predict_proba() are specially built, but
      often the last two methods are not to be called manually.
@@ -683,9 +653,6 @@ class QProximityClassifier(_LocalClassifier):
 
             colname_classes (str): the name of the column in .obs that
              indicates the cell types (classes).
-             Negative controls should be named '__NegativeControl' which is the
-             default name of negative controls generated
-             by pytacs.data.AnnDataPreparer.
 
         Return:
             self (Model): a trained model (self).
@@ -817,8 +784,7 @@ class QProximityClassifier(_LocalClassifier):
 
 
 class CosineSimilarityClassifier(_LocalClassifier):
-    """This classifier would predict probs for each class, EXCLUDING the
-    negative controls.
+    """This classifier would predict probs for each class.
 
     Ref samples of counts of each class are normalized,
     log1p transformed (if specified), and averaged as the ref signatures.
@@ -867,9 +833,6 @@ class CosineSimilarityClassifier(_LocalClassifier):
 
             colname_classes (str): the name of the column in .obs that
              indicates the cell types (classes).
-             Negative controls should be named '__NegativeControl' which is the
-             default name of negative controls generated
-             by pytacs.data.AnnDataPreparer.
 
         Return:
             self (Model): a trained model (self).
@@ -878,7 +841,6 @@ class CosineSimilarityClassifier(_LocalClassifier):
             sn_adata=sn_adata,
             colname_classes=colname_classes,
         )
-        assert not self._has_negative_control
 
         # "Train" the model
         assert isinstance(self._classes, _np.ndarray)
@@ -963,8 +925,7 @@ class CosineSimilarityClassifier(_LocalClassifier):
 class JaccardClassifier(_LocalClassifier):
     """Not Recommended.
 
-    This classifier would predict probs for each class, EXCLUDING the
-    negative controls.
+    This classifier would predict probs for each class.
 
     Ref samples of counts of each class are normalized,
     log1p transformed (if specified), and averaged as the ref signatures.
@@ -1017,9 +978,6 @@ class JaccardClassifier(_LocalClassifier):
 
             colname_classes (str): the name of the column in .obs that
              indicates the cell types (classes).
-             Negative controls should be named '__NegativeControl' which is the
-             default name of negative controls generated
-             by pytacs.data.AnnDataPreparer.
 
             n_top_genes_truncated (int | None): only the first `n_top_genes_truncated` (int)
             many expressed genes are kept as True (expressed), the rest are set to False.
@@ -1032,7 +990,6 @@ class JaccardClassifier(_LocalClassifier):
             sn_adata=sn_adata,
             colname_classes=colname_classes,
         )
-        assert not self._has_negative_control
 
         # "Train" the model
         assert isinstance(self._classes, _np.ndarray)

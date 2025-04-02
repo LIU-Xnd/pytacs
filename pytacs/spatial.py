@@ -517,9 +517,23 @@ class SpatialHandler:
             idx_centroids,
         )
 
-    def run_preMapping(self, n_parallel: int = 1000) -> None:
+    def run_preMapping(
+        self,
+        n_parallel: int = 1000,
+        skip_2nd: bool = False,
+    ) -> None:
+        """Sometimes 2nd round premapping can be time costing. Use skip_2nd=True to skip it."""
         self._firstRound_preMapping(n_parallel=n_parallel)
-        self._secondRound_preMapping()
+        if skip_2nd:
+            self.adata_spatial.obsm["confidence_premapping2"] = self.adata_spatial.obsm[
+                "confidence_premapping1"
+            ].copy()
+            self.adata_spatial.obs["cell_type_premapping2"] = _np.argmax(
+                self.adata_spatial.obsm["confidence_premapping2"],
+                axis=1,
+            )
+        else:
+            self._secondRound_preMapping()
         self._premapped = True
         return
 

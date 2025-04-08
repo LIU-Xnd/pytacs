@@ -1,8 +1,11 @@
 import numpy as _np
 from scanpy import AnnData as _AnnData
 from scipy.sparse import csr_matrix as _csr_matrix
+from scipy.sparse import coo_matrix as _coo_matrix
 from scipy.sparse import dok_matrix as _dok_matrix
+from scipy.sparse import lil_matrix as _lil_matrix
 from scipy.sparse import issparse as _issparse
+from scipy.sparse import eye as _eye
 from numpy import matrix as _matrix
 from numpy.typing import NDArray as _NDArray
 from typing import Iterator as _Iterator
@@ -72,17 +75,18 @@ def find_indices(lst1: _Iterator, lst2: _Iterator) -> _NDArray[_np.int_]:
 
 
 def rearrange_count_matrix(
-    X: _np.ndarray, genes_X: _NDArray[_np.str_], genes_target: _NDArray[_np.str_]
-) -> _np.ndarray:
+    X: _csr_matrix | _coo_matrix | _np.ndarray,
+    genes_X: _NDArray[_np.str_],
+    genes_target: _NDArray[_np.str_],
+) -> _csr_matrix:
     """Reshape X to match genes_target, setting absent gene counts to 0."""
     idx_subgenes = find_indices(lst1=genes_target, lst2=genes_X)
-    X_rearranged = _np.zeros(
-        shape=(X.shape[0], len(genes_target)),
-        dtype=X.dtype,
-    )
+    X_rearranged = _lil_matrix(
+        (X.shape[0], len(genes_target)),
+    ).astype(X.dtype)
     valid_indices = idx_subgenes >= 0
     X_rearranged[:, valid_indices] = X[:, idx_subgenes[valid_indices]]
-    return X_rearranged
+    return X_rearranged.tocsr()
 
 
 def reinit_index(
@@ -186,3 +190,41 @@ def truncate_top_n(
     res[ilocs_truncated] = 1.0
 
     return res
+
+
+def normalize_csr(mat_csr: _csr_matrix) -> _csr_matrix:
+    """
+    Normalize a sparse CSR matrix by dividing each row by its row sum.
+
+    This function computes the inverse of the sum of each row in the input
+    sparse matrix and multiplies the matrix by the corresponding diagonal matrix
+    to normalize each row. The result is a sparse matrix where each row's sum is 1
+    (if the original row sum was non-zero).
+
+    Parameters:
+    -----------
+    mat_csr : _csr_matrix
+        A sparse matrix in Compressed Sparse Row (CSR) format.
+
+    Returns:
+    --------
+    _csr_matrix
+        A normalized sparse matrix where each row is divided by its row sum.
+        The input matrix remains in CSR format.
+
+    Notes:
+    ------
+    - If any row has a sum of zero, it will be skipped, and the corresponding row
+      will remain zero in the resulting matrix.
+    - The function assumes that the input matrix is in CSR format and efficiently
+      performs the normalization without converting the matrix to a dense format.
+    """
+    row_sums: _np.ndarray = to_array(mat_csr.sum(axis=1), squeeze=True)
+    row_sums[row_sums == 0.0] = 1.0
+    row_inv = 1.0 / row_sums
+    diag_row_inv = _eye(
+        m=mat_csr.shape[0],
+        format="csr",
+    )
+    diag_row_inv.data = row_inv
+    return diag_row_inv @ mat_csr  # Normalized

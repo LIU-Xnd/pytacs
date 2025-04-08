@@ -9,6 +9,8 @@ from numpy.typing import NDArray
 from scipy.stats import norm as _norm
 from scipy.sparse import csr_matrix as _csr_matrix
 from scipy.sparse import dok_matrix as _dok_matrix
+from scipy.sparse import issparse as _issparse
+from scipy.sparse.linalg import svds as _svds
 from scipy.spatial import cKDTree as _cKDTree
 from typing import Iterable, Literal
 from .utils import _UNDEFINED, _UndefinedType
@@ -83,6 +85,7 @@ class _LocalClassifier:
         self,
         sn_adata: _AnnData,
         colname_classes: str = "cell_type",
+        to_dense: bool = False,
     ) -> dict:
         """Trains the local classifier using the AnnData (h5ad) format
         snRNA-seq data.
@@ -120,7 +123,8 @@ class _LocalClassifier:
         )
         X_train: NDArray[_np.float_ | _np.int_] | _csr_matrix = sn_adata.X
         if type(X_train) is _csr_matrix:
-            X_train = X_train.toarray()
+            if to_dense:
+                X_train = X_train.toarray()
 
         return dict(X=X_train, y=class_ids)
 
@@ -147,7 +151,7 @@ class _LocalClassifier:
 
         Needs overwriting."""
 
-        X: _np.ndarray = _to_array(X)
+        # X: _np.ndarray = _to_array(X)  # <- this needs modifying for mem
         assert len(X.shape) == 2, "X must be a sample-by-gene matrix"
         assert isinstance(self._genes, Iterable)
         genes_: list[str] = []
@@ -158,13 +162,12 @@ class _LocalClassifier:
             genes_ = list(genes)
         assert len(genes_) == X.shape[1], "genes must be compatible with X.shape[1]"
         # Select those genes that appear in self._genes
-        X_new = _rearrange_count_matrix(X, list(self._genes), genes_)
-        # print(f"{X_new.shape=}")
+        X_new: _csr_matrix = _rearrange_count_matrix(X, list(self._genes), genes_)
         return {"X": X_new}
 
     def predict(
         self,
-        X: NDArray,
+        X: _csr_matrix | NDArray,
         genes: Iterable[str] | None = None,
     ) -> NDArray[_np.int_]:
         """Predicts classes of each sample. For example, if prediction is i,
@@ -285,27 +288,42 @@ class SVM(_LocalClassifier):
             sn_adata=sn_adata,
             colname_classes=colname_classes,
         )
-        X_ready: NDArray = X_y_ready["X"]
+        X_ready: _csr_matrix | NDArray = X_y_ready["X"]
         if self._normalize:
-            X_ready = 1e4 * _np.divide(
-                X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8)
-            )
+            if _issparse(X_ready):
+                # Normalize using sparse-safe operations
+                row_sums = X_ready.sum(
+                    axis=1
+                ).A1  # .A1 to convert the sum to a 1D array
+                row_inv = 1.0 / _np.maximum(row_sums, 1e-8)  # Avoid division by zero
+                X_ready = _csr_matrix.multiply(X_ready, row_inv[:, _np.newaxis]) * 1e4
+            else:
+                X_ready = 1e4 * _np.divide(
+                    X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8)
+                )
         if self._log1p:
-            X_ready = _np.log1p(X_ready)
+            if _issparse(X_ready):
+                X_ready.data = _np.log1p(X_ready.data)
+            else:
+                X_ready = _np.log1p(X_ready)
         if self._on_PCs:
-            # Non-centered PCA
-            self._PC_loadings = _np.real(  # in case it is complex, but barely
-                _np.linalg.svd(
-                    a=X_ready, full_matrices=False, compute_uv=True, hermitian=False
-                ).Vh  # the loading matrix, PC by gene
-            )[: self._n_PCs, :]
+            if _issparse(X_ready):
+                U, S, Vh = _svds(X_ready, k=self._n_PCs)
+                self._PC_loadings = _np.real(Vh)
+            else:
+                # Non-centered PCA
+                self._PC_loadings = _np.real(  # in case it is complex, but barely
+                    _np.linalg.svd(
+                        a=X_ready, full_matrices=False, compute_uv=True, hermitian=False
+                    ).Vh  # the loading matrix, PC by gene
+                )[: self._n_PCs, :]
             X_ready = X_ready @ self._PC_loadings.T
         self._model.fit(X=X_ready, y=X_y_ready["y"])
         return self
 
     def predict_proba(
         self,
-        X: NDArray,
+        X: _csr_matrix | NDArray,
         genes: Iterable[str] | None = None,
     ) -> NDArray[_np.float_]:
         """Predicts the probabilities for each
@@ -323,11 +341,22 @@ class SVM(_LocalClassifier):
 
         X_ready: NDArray = super().predict_proba(X, genes)["X"]
         if self._normalize:
-            X_ready = 1e4 * _np.divide(
-                X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8)
-            )
+            if _issparse(X_ready):
+                # Normalize using sparse-safe operations
+                row_sums = X_ready.sum(
+                    axis=1
+                ).A1  # .A1 to convert the sum to a 1D array
+                row_inv = 1.0 / _np.maximum(row_sums, 1e-8)  # Avoid division by zero
+                X_ready = _csr_matrix.multiply(X_ready, row_inv[:, _np.newaxis]) * 1e4
+            else:
+                X_ready = 1e4 * _np.divide(
+                    X_ready, _np.maximum(_np.sum(X_ready, axis=1).reshape(-1, 1), 1e-8)
+                )
         if self._log1p:
-            X_ready = _np.log1p(X_ready)
+            if _issparse(X_ready):
+                X_ready.data = _np.log1p(X_ready.data)
+            else:
+                X_ready = _np.log1p(X_ready)
         if self._on_PCs:
             assert isinstance(self._PC_loadings, _np.ndarray)
             X_ready = X_ready @ self._PC_loadings.T
@@ -335,7 +364,7 @@ class SVM(_LocalClassifier):
 
     def predict(
         self,
-        X: NDArray,
+        X: _csr_matrix | NDArray,
         genes: Iterable[str] | None = None,
     ) -> NDArray[_np.int_]:
         """Predicts classes of each sample. For example, if prediction is i,

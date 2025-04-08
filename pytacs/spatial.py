@@ -50,6 +50,7 @@ def rw_aggregate(
     steps_per_iter: int = 1,
     nbhd_radius: float = 1.5,
     max_propagation_radius: float = 4.5,
+    log1p_: bool = True,
     mode_embedding: _Literal["raw", "pc"] = "pc",
     n_pcs: int = 30,
     mode_metric: _Literal["inv_dist"] = "inv_dist",
@@ -84,6 +85,9 @@ def rw_aggregate(
         max_propagation_radius (float, optional):
             Radius for maximum possible random walk distance in spatial graph propagation. Default is 4.5.
 
+        log1p_ (bool, optional):
+            Whether to perform log1p on raw count matrix before building spatial graph. Default is True.
+
         mode_embedding (Literal['raw', 'pc'], optional):
             Embedding mode for similarity calculation.
             'raw' uses the original expression matrix; 'pc' uses PCA-reduced data. Default is 'pc'.
@@ -115,6 +119,9 @@ def rw_aggregate(
     assert mode_aggregation in ["weighted"]
     assert mode_walk in ["rw"]
 
+    X_normalized = _normalize_csr(st_anndata.X.astype(float)).copy()
+    if log1p_:
+        X_normalized.data = _np.log1p(X_normalized.data)
     # Get SVD transformer
     if mode_embedding == "pc":
         n_pcs: int = min(n_pcs, st_anndata.shape[1])
@@ -127,7 +134,7 @@ def rw_aggregate(
         )
         _tqdm.write(f"Performing truncated PCA (n_pcs={n_pcs})..")
         svd.fit(
-            X=_normalize_csr(st_anndata.X.astype(float)),
+            X=X_normalized,
         )
         embed_loadings: _np.ndarray = svd.components_  # k x n_features
         del svd
@@ -178,7 +185,9 @@ def rw_aggregate(
         (distances_spatial.shape[0], distances_spatial.shape[1]),
     )
     # Get defined embedding
-    embeds: _np.ndarray = _normalize_csr(st_anndata.X.astype(float)) @ embed_loadings.T
+    embeds: _np.ndarray = X_normalized @ embed_loadings.T
+    del X_normalized
+    del embed_loadings
     ilocs_nonzero = _np.array(list(zip(distances_spatial.row, distances_spatial.col)))
     distances[ilocs_nonzero[:, 0], ilocs_nonzero[:, 1]] = _np.linalg.norm(
         embeds[ilocs_nonzero[:, 0], :] - embeds[ilocs_nonzero[:, 1], :], axis=1

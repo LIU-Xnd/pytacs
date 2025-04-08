@@ -54,7 +54,7 @@ def rw_aggregate(
     mode_embedding: _Literal["raw", "pc"] = "pc",
     n_pcs: int = 30,
     mode_metric: _Literal["inv_dist"] = "inv_dist",
-    mode_aggregation: _Literal["weighted"] = "weighted",
+    mode_aggregation: _Literal["weighted", "unweighted"] = "weighted",
     mode_walk: _Literal["rw"] = "rw",
 ) -> AggregationResult:
     """
@@ -116,7 +116,7 @@ def rw_aggregate(
     """
     assert mode_embedding in ["raw", "pc"]
     assert mode_metric in ["inv_dist"]
-    assert mode_aggregation in ["weighted"]
+    assert mode_aggregation in ["weighted", "unweighted"]
     assert mode_walk in ["rw"]
 
     X_normalized = _normalize_csr(st_anndata.X.astype(float)).copy()
@@ -221,9 +221,14 @@ def rw_aggregate(
     counter_conf_global = dict()
     for i_iter in range(max_iter):
         # Aggregate spots according to similarities
-        X_agg_candidate: _csr_matrix = similarities[
-            candidate_cellids, :
-        ] @ st_anndata.X.astype(float)
+        if mode_aggregation == "unweighted":
+            X_agg_candidate: _csr_matrix = similarities[candidate_cellids, :].astype(
+                bool
+            ).astype(float) @ st_anndata.X.astype(float)
+        else:
+            X_agg_candidate: _csr_matrix = similarities[
+                candidate_cellids, :
+            ] @ st_anndata.X.astype(float)
         # Classify
         probs_candidate: _np.ndarray = classifier.predict_proba(
             X=X_agg_candidate,

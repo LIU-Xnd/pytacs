@@ -244,7 +244,7 @@ def trim_csr_per_row(
     if tqdm_verbose:
         itor_ = _tqdm(
             range(csr_mat.shape[0]),
-            desc="Trimming",
+            desc=f"Trimming off {trim_proportion:.1%} nodes",
             ncols=60,
         )
     else:
@@ -274,3 +274,42 @@ def trim_csr_per_row(
         shape=csr_mat.shape,
     )
     return trimmed_csr
+
+
+def rowwise_cosine_similarity(A: _np.ndarray, B: _np.ndarray) -> _NDArray[_np.float_]:
+    """
+    Compute row-wise cosine similarity between two matrices of shape (N, p).
+
+    Each row in A and B represents a p-dimensional embedding of a sample.
+    The function returns a 1D array of length N, where each entry is the
+    cosine similarity between the corresponding rows of A and B.
+
+    Parameters:
+    -----------
+    A : np.ndarray
+        Array of shape (N, p), representing N sample embeddings.
+    B : np.ndarray
+        Array of shape (N, p), representing N sample embeddings.
+
+    Returns:
+    --------
+    similarities : np.ndarray
+        Array of shape (N,), containing the cosine similarity between
+        each pair of corresponding rows in A and B.
+
+    Notes:
+    ------
+    - If any row in A or B has zero norm, its similarity will be computed
+      safely with a small epsilon to avoid division by zero.
+    """
+    assert A.shape == B.shape, "Input matrices must have the same shape"
+
+    dot = _np.sum(A * B, axis=1)
+    norm_A = _np.linalg.norm(A, axis=1)
+    norm_B = _np.linalg.norm(B, axis=1)
+
+    # Avoid zero division
+    denom = norm_A * norm_B
+    denom[denom == 0.0] = 1e-8
+
+    return dot / denom

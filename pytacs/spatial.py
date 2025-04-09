@@ -22,6 +22,7 @@ from typing import Literal as _Literal
 from sklearn.decomposition import TruncatedSVD as _TruncatedSVD
 from .utils import normalize_csr as _normalize_csr
 from .utils import trim_csr_per_row as _trim_csr_per_row
+from .utils import rowwise_cosine_similarity as _rowwise_cosine_similarity
 
 
 @_dataclass
@@ -55,7 +56,7 @@ def rw_aggregate(
     log1p_: bool = True,
     mode_embedding: _Literal["raw", "pc"] = "pc",
     n_pcs: int = 30,
-    mode_metric: _Literal["inv_dist"] = "inv_dist",
+    mode_metric: _Literal["inv_dist", "cosine"] = "inv_dist",
     mode_aggregation: _Literal["weighted", "unweighted"] = "weighted",
     trim_proportion: float = 0.5,
     mode_walk: _Literal["rw"] = "rw",
@@ -102,7 +103,7 @@ def rw_aggregate(
         n_pcs (int, optional):
             Number of principal components to retain when `mode_embedding='pc'`. Default is 100.
 
-        mode_metric (Literal['inv_dist'], optional):
+        mode_metric (Literal['inv_dist', 'cosine'], optional):
             Distance or similarity metric to define transition weights between spots. Default is 'inv_dist'.
 
         mode_aggregation (Literal['unweighted', 'weighted'], optional):
@@ -126,7 +127,7 @@ def rw_aggregate(
                 - `weight_matrix`: CSR matrix representing transition probabilities between all spots.
     """
     assert mode_embedding in ["raw", "pc"]
-    assert mode_metric in ["inv_dist"]
+    assert mode_metric in ["inv_dist", "cosine"]
     assert mode_aggregation in ["weighted", "unweighted"]
     assert trim_proportion >= 0.0 and trim_proportion < 1.0
     assert mode_walk in ["rw"]
@@ -204,9 +205,17 @@ def rw_aggregate(
     del X_normalized
     del embed_loadings
     ilocs_nonzero = _np.array(list(zip(distances_spatial.row, distances_spatial.col)))
-    distances[ilocs_nonzero[:, 0], ilocs_nonzero[:, 1]] = _np.linalg.norm(
-        embeds[ilocs_nonzero[:, 0], :] - embeds[ilocs_nonzero[:, 1], :], axis=1
-    )
+    if mode_metric == "inv_dist":
+        distances[ilocs_nonzero[:, 0], ilocs_nonzero[:, 1]] = _np.linalg.norm(
+            embeds[ilocs_nonzero[:, 0], :] - embeds[ilocs_nonzero[:, 1], :], axis=1
+        )
+    else:
+        distances[ilocs_nonzero[:, 0], ilocs_nonzero[:, 1]] = (
+            _rowwise_cosine_similarity(
+                embeds[ilocs_nonzero[:, 0], :],
+                embeds[ilocs_nonzero[:, 1], :],
+            )
+        )
     distances = distances.tocoo()
 
     # Compute inv_dist similarity using sparse operations: S_ij = 1 / (1 + d_ij)
@@ -298,7 +307,7 @@ def rw_aggregate(
             similarities: _coo_matrix = similarities.tocoo()
             # including diagonals
 
-            _tqdm.write("Trimming..")
+            # _tqdm.write("Trimming..")
             mask = _np.zeros_like(similarities.data, dtype=bool)
             for i in range(len(similarities.data)):
                 if (similarities.row[i], similarities.col[i]) in query_pool_propagation:

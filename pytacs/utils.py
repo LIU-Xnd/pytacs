@@ -9,6 +9,7 @@ from scipy.sparse import eye as _eye
 from numpy import matrix as _matrix
 from numpy.typing import NDArray as _NDArray
 from typing import Iterator as _Iterator
+from tqdm import tqdm as _tqdm
 
 
 # Placeholder type
@@ -228,3 +229,48 @@ def normalize_csr(mat_csr: _csr_matrix) -> _csr_matrix:
     )
     diag_row_inv.data = row_inv
     return diag_row_inv @ mat_csr  # Normalized
+
+
+def trim_csr_per_row(
+    csr_mat: _csr_matrix,
+    trim_proportion: float = 0.5,
+    tqdm_verbose: bool = True,
+) -> _csr_matrix:
+    """Trim off the least `trim_proportion` terms per row."""
+    new_data = []
+    new_indices = []
+    new_indptr = [0]
+
+    if tqdm_verbose:
+        itor_ = _tqdm(
+            range(csr_mat.shape[0]),
+            desc="Trimming",
+            ncols=60,
+        )
+    else:
+        itor_ = range(csr_mat.shape[0])
+    for i in itor_:
+        row_start = csr_mat.indptr[i]
+        row_end = csr_mat.indptr[i + 1]
+        row_data = csr_mat.data[row_start:row_end]
+        row_indices = csr_mat.indices[row_start:row_end]
+
+        if len(row_data) == 0:
+            new_indptr.append(len(new_data))
+            continue
+
+        # Sort by value
+        sorted_idx = _np.argsort(row_data)[::-1]
+        keep_count = max(1, int(_np.ceil(len(row_data) * (1 - trim_proportion))))
+        keep_idx = sorted_idx[:keep_count]
+
+        # Keep only top proportion
+        new_data.extend(row_data[keep_idx])
+        new_indices.extend(row_indices[keep_idx])
+        new_indptr.append(len(new_data))
+
+    trimmed_csr = _csr_matrix(
+        (new_data, new_indices, new_indptr),
+        shape=csr_mat.shape,
+    )
+    return trimmed_csr

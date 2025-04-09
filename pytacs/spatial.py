@@ -21,6 +21,7 @@ import pandas as _pd
 from typing import Literal as _Literal
 from sklearn.decomposition import TruncatedSVD as _TruncatedSVD
 from .utils import normalize_csr as _normalize_csr
+from .utils import trim_csr_per_row as _trim_csr_per_row
 
 
 @_dataclass
@@ -50,11 +51,13 @@ def rw_aggregate(
     steps_per_iter: int = 1,
     nbhd_radius: float = 1.5,
     max_propagation_radius: float = 4.5,
+    normalize_: bool = True,
     log1p_: bool = True,
     mode_embedding: _Literal["raw", "pc"] = "pc",
     n_pcs: int = 30,
     mode_metric: _Literal["inv_dist"] = "inv_dist",
     mode_aggregation: _Literal["weighted", "unweighted"] = "weighted",
+    trim_proportion: float = 0.5,
     mode_walk: _Literal["rw"] = "rw",
 ) -> AggregationResult:
     """
@@ -85,6 +88,10 @@ def rw_aggregate(
         max_propagation_radius (float, optional):
             Radius for maximum possible random walk distance in spatial graph propagation. Default is 4.5.
 
+        normalize_ (bool, optional):
+            Whether to perform normalization on raw count matrix before building spatial graph.
+            Default is True.
+
         log1p_ (bool, optional):
             Whether to perform log1p on raw count matrix before building spatial graph. Default is True.
 
@@ -102,6 +109,10 @@ def rw_aggregate(
             Aggregation strategy to combine neighborhood gene expression.
             'unweighted' uses uniform averaging; 'weighted' uses transition probabilities. Default is 'weighted'.
 
+        trim_proportion (float, optional):
+            Proportion of nodes to trim off after each iter of random walk, in order to prevent accumulation of
+            erroneous spots.
+
         mode_walk (Literal['rw', 'rwr'], optional):
             Type of random walk to perform:
             'rw' for vanilla random walk,
@@ -117,9 +128,13 @@ def rw_aggregate(
     assert mode_embedding in ["raw", "pc"]
     assert mode_metric in ["inv_dist"]
     assert mode_aggregation in ["weighted", "unweighted"]
+    assert trim_proportion >= 0.0 and trim_proportion < 1.0
     assert mode_walk in ["rw"]
 
-    X_normalized = _normalize_csr(st_anndata.X.astype(float)).copy()
+    if normalize_:
+        X_normalized = _normalize_csr(st_anndata.X.astype(float)).copy()
+    else:
+        X_normalized = st_anndata.X.astype(float).copy()
     if log1p_:
         X_normalized.data = _np.log1p(X_normalized.data)
     # Get SVD transformer
@@ -218,7 +233,7 @@ def rw_aggregate(
     # final weight_matrix of all spots, gonna update
     weight_matrix = _lil_matrix((similarities.shape[0], similarities.shape[1]))
     # Random Walk
-    counter_conf_global = dict()
+    counter_celltypes_global = dict()
     for i_iter in range(max_iter):
         # Aggregate spots according to similarities
         if mode_aggregation == "unweighted":
@@ -230,6 +245,7 @@ def rw_aggregate(
                 candidate_cellids, :
             ] @ st_anndata.X.astype(float)
         # Classify
+        _tqdm.write("Classifying..")
         probs_candidate: _np.ndarray = classifier.predict_proba(
             X=X_agg_candidate,
             genes=st_anndata.var.index.values,
@@ -242,7 +258,7 @@ def rw_aggregate(
         whr_confident_candidate: _NDArray[_np.bool_] = (
             confidences_candidate >= classifier._threshold_confidence
         )
-        counter_conf = dict()
+        counter_celltypes = dict()
         ave_conf = 0.0
         for i_candidate in _tqdm(
             range(len(candidate_cellids)),
@@ -259,14 +275,16 @@ def rw_aggregate(
                 celltypes_confident.append(typename)
                 confidences_confident.append(conf)
                 weight_matrix[cellid, :] = similarities[cellid, :]
-                counter_conf[typename] = counter_conf.get(typename, 0) + 1
-                counter_conf_global[typename] = counter_conf_global.get(typename, 0) + 1
+                counter_celltypes[typename] = counter_celltypes.get(typename, 0) + 1
+                counter_celltypes_global[typename] = (
+                    counter_celltypes_global.get(typename, 0) + 1
+                )
             ave_conf += conf
 
         _tqdm.write(f"Ave conf: {ave_conf/candidate_cellids.shape[0]:.2%}")
         candidate_cellids = candidate_cellids[~whr_confident_candidate]
-        _tqdm.write(f"{counter_conf=}")
-        _tqdm.write(f"{counter_conf_global=}")
+        _tqdm.write(f"{counter_celltypes=}")
+        _tqdm.write(f"{counter_celltypes_global=}")
         if len(candidate_cellids) == 0:
             break
         # Random walk
@@ -296,6 +314,14 @@ def rw_aggregate(
             similarities: _csr_matrix = similarities.tocsr()
             # Re-normalize
             similarities: _csr_matrix = _normalize_csr(similarities)
+        # Trim
+        if trim_proportion == 0.0:
+            continue
+        similarities = _trim_csr_per_row(
+            csr_mat=similarities,
+            trim_proportion=trim_proportion,
+            tqdm_verbose=True,
+        )
 
     weight_matrix: _csr_matrix = weight_matrix.tocsr()
     # Construct Results

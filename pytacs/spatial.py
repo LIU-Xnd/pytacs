@@ -48,18 +48,19 @@ class AggregationResult:
 def rw_aggregate(
     st_anndata: _AnnData,
     classifier: _LocalClassifier,
-    max_iter: int = 3,
+    max_iter: int = 20,
     steps_per_iter: int = 1,
     nbhd_radius: float = 1.5,
-    max_propagation_radius: float = 4.5,
+    max_propagation_radius: float = 6.0,
     normalize_: bool = True,
     log1p_: bool = True,
     mode_embedding: _Literal["raw", "pc"] = "pc",
     n_pcs: int = 30,
-    mode_metric: _Literal["inv_dist", "cosine"] = "inv_dist",
-    mode_aggregation: _Literal["weighted", "unweighted"] = "weighted",
+    mode_metric: _Literal["inv_dist", "cosine"] = "cosine",
+    mode_aggregation: _Literal["weighted", "unweighted"] = "unweighted",
     trim_proportion: float = 0.5,
     mode_walk: _Literal["rw"] = "rw",
+    verbose: bool = True,
 ) -> AggregationResult:
     """
     Perform iterative random-walk-based spot aggregation and classification refinement
@@ -78,16 +79,16 @@ def rw_aggregate(
             `threshold_confidence` attribute for confidence determination.
 
         max_iter (int, optional):
-            Number of refinement iterations to perform. Default is 3.
+            Number of refinement iterations to perform.
 
         steps_per_iter (int, optional):
-            Number of random walk steps to perform in each iteration. Default is 1.
+            Number of random walk steps to perform in each iteration.
 
         nbhd_radius (float, optional):
-            Radius for defining local neighborhood in spatial graph construction. Default is 1.5.
+            Radius for defining local neighborhood in spatial graph construction.
 
         max_propagation_radius (float, optional):
-            Radius for maximum possible random walk distance in spatial graph propagation. Default is 4.5.
+            Radius for maximum possible random walk distance in spatial graph propagation.
 
         normalize_ (bool, optional):
             Whether to perform normalization on raw count matrix before building spatial graph.
@@ -101,14 +102,14 @@ def rw_aggregate(
             'raw' uses the original expression matrix; 'pc' uses PCA-reduced data. Default is 'pc'.
 
         n_pcs (int, optional):
-            Number of principal components to retain when `mode_embedding='pc'`. Default is 100.
+            Number of principal components to retain when `mode_embedding='pc'`.
 
         mode_metric (Literal['inv_dist', 'cosine'], optional):
-            Distance or similarity metric to define transition weights between spots. Default is 'inv_dist'.
+            Distance or similarity metric to define transition weights between spots.
 
         mode_aggregation (Literal['unweighted', 'weighted'], optional):
             Aggregation strategy to combine neighborhood gene expression.
-            'unweighted' uses uniform averaging; 'weighted' uses transition probabilities. Default is 'weighted'.
+            'unweighted' uses uniform averaging; 'weighted' uses transition probabilities.
 
         trim_proportion (float, optional):
             Proportion of nodes to trim off after each iter of random walk, in order to prevent accumulation of
@@ -148,7 +149,8 @@ def rw_aggregate(
         svd = _TruncatedSVD(
             n_components=n_pcs,
         )
-        _tqdm.write(f"Performing truncated PCA (n_pcs={n_pcs})..")
+        if verbose:
+            _tqdm.write(f"Performing truncated PCA (n_pcs={n_pcs})..")
         svd.fit(
             X=X_normalized,
         )
@@ -165,7 +167,8 @@ def rw_aggregate(
         )
     # Generate topology relation matrix
     # Get spatial neighborhood
-    _tqdm.write(f"Constructing spatial graph..")
+    if verbose:
+        _tqdm.write(f"Constructing spatial graph..")
     ckdtree_spatial = _cKDTree(st_anndata.obsm["spatial"])
     distances_spatial = ckdtree_spatial.sparse_distance_matrix(
         other=ckdtree_spatial,
@@ -258,7 +261,8 @@ def rw_aggregate(
                 candidate_cellids, :
             ] @ st_anndata.X.astype(float)
         # Classify
-        _tqdm.write("Classifying..")
+        if verbose:
+            _tqdm.write("Classifying..")
         probs_candidate: _np.ndarray = classifier.predict_proba(
             X=X_agg_candidate,
             genes=st_anndata.var.index.values,
@@ -273,17 +277,20 @@ def rw_aggregate(
         )
         counter_celltypes = dict()
         ave_conf = 0.0
-        for i_candidate in _tqdm(
-            range(len(candidate_cellids)),
-            desc=f"Gather iter {i_iter+1} results",
-            ncols=60,
-        ):
+        if verbose:
+            _itor = _tqdm(
+                range(len(candidate_cellids)),
+                desc=f"Gather iter {i_iter+1} results",
+                ncols=60,
+            )
+        else:
+            _itor = range(len(candidate_cellids))
+        for i_candidate in _itor:
             cellid: int = candidate_cellids[i_candidate]
             is_conf: bool = whr_confident_candidate[i_candidate]
             conf = confidences_candidate[i_candidate]
             typeid: int = type_ids_candidate[i_candidate]
             typename: str = classifier._classes[typeid]
-            # _tqdm.write(f"DEBUG: {conf=} | {typename=}")
             if is_conf:
                 cellids_confident.append(cellid)
                 celltypes_confident.append(typename)
@@ -294,25 +301,29 @@ def rw_aggregate(
                     counter_celltypes_global.get(typename, 0) + 1
                 )
             ave_conf += conf
-
-        _tqdm.write(f"Ave conf: {ave_conf/candidate_cellids.shape[0]:.2%}")
+        if verbose:
+            _tqdm.write(f"Ave conf: {ave_conf/candidate_cellids.shape[0]:.2%}")
         candidate_cellids = candidate_cellids[~whr_confident_candidate]
-        _tqdm.write(f"{counter_celltypes=}")
-        _tqdm.write(f"{counter_celltypes_global=}")
+        if verbose:
+            _tqdm.write(f"{counter_celltypes=}")
+            _tqdm.write(f"{counter_celltypes_global=}")
         if len(candidate_cellids) == 0:
             break
         # Random walk
-        for i_step in _tqdm(
-            range(steps_per_iter),
-            desc="Random walk..",
-            ncols=60,
-        ):
+        if verbose:
+            _itor = _tqdm(
+                range(steps_per_iter),
+                desc="Random walk..",
+                ncols=60,
+            )
+        else:
+            _itor = range(steps_per_iter)
+        for i_step in _itor:
             similarities: _csr_matrix = similarities @ similarities
             # Truncate propagation by max_propagation_radius for fast computation and stability.
             similarities: _coo_matrix = similarities.tocoo()
             # including diagonals
 
-            # _tqdm.write("Trimming..")
             mask = _np.zeros_like(similarities.data, dtype=bool)
             for i in range(len(similarities.data)):
                 if (similarities.row[i], similarities.col[i]) in query_pool_propagation:
@@ -334,7 +345,7 @@ def rw_aggregate(
         similarities = _trim_csr_per_row(
             csr_mat=similarities,
             trim_proportion=trim_proportion,
-            tqdm_verbose=True,
+            tqdm_verbose=verbose,
         )
 
     weight_matrix: _csr_matrix = weight_matrix.tocsr()

@@ -209,21 +209,25 @@ def rw_aggregate(
         distances[ilocs_nonzero[:, 0], ilocs_nonzero[:, 1]] = _np.linalg.norm(
             embeds[ilocs_nonzero[:, 0], :] - embeds[ilocs_nonzero[:, 1], :], axis=1
         )
+        distances = distances.tocoo()
+
+        # Compute inv_dist similarity using sparse operations: S_ij = 1 / (1 + d_ij)
+        similarities = _coo_matrix(
+            (1 / (1 + distances.data), (distances.row, distances.col)),
+            shape=distances.shape,
+        )
+        del distances
+        similarities = similarities.tolil()
     else:
-        distances[ilocs_nonzero[:, 0], ilocs_nonzero[:, 1]] = (
+        similarities = _lil_matrix(
+            (distances_spatial.shape[0], distances_spatial.shape[1])
+        )
+        similarities[ilocs_nonzero[:, 0], ilocs_nonzero[:, 1]] = (
             _rowwise_cosine_similarity(
                 embeds[ilocs_nonzero[:, 0], :],
                 embeds[ilocs_nonzero[:, 1], :],
             )
         )
-    distances = distances.tocoo()
-
-    # Compute inv_dist similarity using sparse operations: S_ij = 1 / (1 + d_ij)
-    similarities = _coo_matrix(
-        (1 / (1 + distances.data), (distances.row, distances.col)),
-        shape=distances.shape,
-    )
-    similarities = similarities.tolil()
     similarities[
         _np.arange(similarities.shape[0]), _np.arange(similarities.shape[0])
     ] = 1.0
@@ -277,9 +281,10 @@ def rw_aggregate(
             cellid: int = candidate_cellids[i_candidate]
             is_conf: bool = whr_confident_candidate[i_candidate]
             conf = confidences_candidate[i_candidate]
+            typeid: int = type_ids_candidate[i_candidate]
+            typename: str = classifier._classes[typeid]
+            # _tqdm.write(f"DEBUG: {conf=} | {typename=}")
             if is_conf:
-                typeid: int = type_ids_candidate[i_candidate]
-                typename: str = classifier._classes[typeid]
                 cellids_confident.append(cellid)
                 celltypes_confident.append(typename)
                 confidences_confident.append(conf)
@@ -387,13 +392,12 @@ def extract_celltypes_full(
     - The function assumes that the aggregation result has cell-type labels accessible.
     """
 
-    celltypes_full = _np.empty(
+    celltypes_full = _np.zeros(
         shape=(aggregation_result.weight_matrix.shape[0],),
-        dtype=str,
-    )
+    ).astype(str)
     celltypes_full[:] = name_undefined
-    cellids_conf = aggregation_result.dataframe["cell_id"].values
-    celltypes_conf = aggregation_result.dataframe["cell_type"].values
+    cellids_conf = aggregation_result.dataframe["cell_id"].values.astype(int)
+    celltypes_conf = aggregation_result.dataframe["cell_type"].values.astype(str)
     celltypes_full[cellids_conf] = celltypes_conf[:]
 
     return celltypes_full

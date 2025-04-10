@@ -121,7 +121,7 @@ class _LocalClassifier:
         class_ids: NDArray[_np.int_] = self.classNames_to_classIds(
             _np.array(sn_adata.obs[colname_classes]).astype(str)
         )
-        X_train: NDArray[_np.float_ | _np.int_] | _csr_matrix = sn_adata.X
+        X_train: NDArray[_np.float_ | _np.int_] | _csr_matrix = sn_adata.X.copy()
         if type(X_train) is _csr_matrix:
             if to_dense:
                 X_train = X_train.toarray()
@@ -132,6 +132,7 @@ class _LocalClassifier:
         self,
         X: NDArray | _csr_matrix,
         genes: Iterable[str] | None = None,
+        to_dense: bool = False,
     ) -> dict:
         """Predicts the probabilities for each
         sample to be of each class.
@@ -159,10 +160,12 @@ class _LocalClassifier:
             genes_ = list(self._genes)
         else:
             assert isinstance(genes, Iterable)
-            genes_ = list(genes)
+        genes_ = _np.array(genes)
         assert len(genes_) == X.shape[1], "genes must be compatible with X.shape[1]"
         # Select those genes that appear in self._genes
-        X_new: _csr_matrix = _rearrange_count_matrix(X, list(self._genes), genes_)
+        X_new: _csr_matrix = _rearrange_count_matrix(X, genes_, _np.array(self._genes))
+        if to_dense:
+            X_new = X_new.toarray()
         return {"X": X_new}
 
     def predict(
@@ -267,6 +270,7 @@ class SVM(_LocalClassifier):
         self,
         sn_adata: _AnnData,
         colname_classes: str = "cell_type",
+        to_dense: bool = False,
     ):
         """Trains the local classifier using the AnnData (h5ad) format
         snRNA-seq data.
@@ -287,6 +291,7 @@ class SVM(_LocalClassifier):
         X_y_ready: dict = super().fit(
             sn_adata=sn_adata,
             colname_classes=colname_classes,
+            to_dense=to_dense,
         )
         X_ready: _csr_matrix | NDArray = X_y_ready["X"]
         if self._normalize:
@@ -339,7 +344,7 @@ class SVM(_LocalClassifier):
             2darray[float]: probs of falling into each class;
              each row is a sample and each column is a class."""
 
-        X_ready: NDArray = super().predict_proba(X, genes)["X"]
+        X_ready: _csr_matrix | NDArray = super().predict_proba(X, genes)["X"]
         if self._normalize:
             if _issparse(X_ready):
                 # Normalize using sparse-safe operations

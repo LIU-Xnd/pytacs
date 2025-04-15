@@ -60,6 +60,7 @@ def rw_aggregate(
     mode_aggregation: _Literal["weighted", "unweighted"] = "unweighted",
     trim_proportion: float = 0.5,
     mode_walk: _Literal["rw"] = "rw",
+    return_weight_matrix: bool = False,
     verbose: bool = True,
 ) -> AggregationResult:
     """
@@ -120,12 +121,17 @@ def rw_aggregate(
             'rw' for vanilla random walk,
             'rwr' for random walk with restart. Default is 'rw'.
 
+        return_weight_matrix (bool, optional):
+            If True, will return weight_matrix in AggregationResult. Note this process may drastically increase
+            computational time!
+
     Returns:
         AggregationResult:
             A dataclass containing:
                 - `dataframe`: DataFrame with predicted `cell_id`, `cell_type`, and confidence scores.
                 - `expr_matrix`: CSR matrix of aggregated expression for confident spots.
-                - `weight_matrix`: CSR matrix representing transition probabilities between all spots.
+                - `weight_matrix`: CSR matrix representing transition probabilities between all spots, if `return_weight_matrix`;
+                otherwise an empty matrix.
     """
     assert mode_embedding in ["raw", "pc"]
     assert mode_metric in ["inv_dist", "cosine"]
@@ -247,7 +253,13 @@ def rw_aggregate(
     # confidences corresponding to celltypes_confident, gonna bloat
     confidences_confident = []
     # final weight_matrix of all spots, gonna update
-    weight_matrix = _lil_matrix((similarities.shape[0], similarities.shape[1]))
+    # weight_matrix = _lil_matrix((similarities.shape[0], similarities.shape[1]))
+    # Modified: using efficient construction with coo
+    weight_matrix: dict = {
+        "rows": [],
+        "cols": [],
+        "data": [],
+    }
     # Random Walk
     counter_celltypes_global = dict()
     for i_iter in range(max_iter):
@@ -289,18 +301,28 @@ def rw_aggregate(
             cellid: int = candidate_cellids[i_candidate]
             is_conf: bool = whr_confident_candidate[i_candidate]
             conf = confidences_candidate[i_candidate]
-            typeid: int = type_ids_candidate[i_candidate]
-            typename: str = classifier._classes[typeid]
             if is_conf:
+                typeid: int = type_ids_candidate[i_candidate]
+                typename: str = classifier._classes[typeid]
                 cellids_confident.append(cellid)
                 celltypes_confident.append(typename)
                 confidences_confident.append(conf)
-                weight_matrix[cellid, :] = similarities[cellid, :]
+                if return_weight_matrix:
+                    # weight_matrix[cellid, :] = similarities[cellid, :]
+                    # Modified version with coo
+                    weight_matrix["rows"].append(cellid)
+                    cols_nonzero = similarities.getrow(cellid).nonzero()[1]
+                    weight_matrix["cols"] += cols_nonzero
+                    weight_matrix["data"] += _to_array(
+                        similarities[cellid, cols_nonzero],
+                        squeeze=True,
+                    ).tolist()
                 counter_celltypes[typename] = counter_celltypes.get(typename, 0) + 1
                 counter_celltypes_global[typename] = (
                     counter_celltypes_global.get(typename, 0) + 1
                 )
             ave_conf += conf
+
         if verbose:
             _tqdm.write(f"Ave conf: {ave_conf/candidate_cellids.shape[0]:.2%}")
         candidate_cellids = candidate_cellids[~whr_confident_candidate]
@@ -348,6 +370,10 @@ def rw_aggregate(
             tqdm_verbose=verbose,
         )
 
+    weight_matrix: _coo_matrix = _coo_matrix(
+        (weight_matrix["data"], (weight_matrix["rows"], weight_matrix["cols"])),
+        shape=(st_anndata.X.shape[0], st_anndata.X.shape[0]),
+    )
     weight_matrix: _csr_matrix = weight_matrix.tocsr()
     # Construct Results
     return AggregationResult(

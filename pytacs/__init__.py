@@ -11,7 +11,7 @@
 # - Improved local classifier strategy - higher inferencing accuracy;
 
 
-__version__ = "1.7.7"
+__version__ = "1.7.8"
 
 from .data import AnnDataPreparer, downsample_cells, compare_umap
 from .classifier import (

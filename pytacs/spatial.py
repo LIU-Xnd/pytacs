@@ -440,6 +440,211 @@ def extract_celltypes_full(
     return celltypes_full
 
 
+@_dataclass
+class SpatialTypeAnnCntMtx:
+    """
+    A data class representing a gene count matrix with spatial coordinates and annotated cell types.
+
+    Attributes:
+    -----------
+    count_matrix : scipy.sparse.csr_matrix
+        A sparse matrix of shape (n_samples, n_genes) where each entry represents
+        the count of a specific gene in a specific sample (or spatial location).
+
+    spatial_coords : numpy.ndarray
+        A 2D array of shape (n_samples, 2), where each row contains the spatial
+        coordinates (e.g., x, y) corresponding to the sample or cell.
+
+    cell_types : numpy.ndarray
+        A 1D array of length n_samples where each element is a string representing
+        the cell type annotation for the corresponding sample or cell.
+
+    Assertions:
+    -----------
+    - The number of rows in `count_matrix` must match the number of rows in `spatial_coords`
+      (i.e., the number of spatial locations).
+    - The number of rows in `count_matrix` must also match the number of entries in `cell_types`
+      (i.e., the number of annotated cell types).
+
+    Example:
+    --------
+    # Create a sparse count matrix, spatial coordinates, and cell types.
+    count_matrix = csr_matrix([[5, 3], [4, 2], [6, 1]])
+    spatial_coords = np.array([[0.1, 0.2], [0.4, 0.5], [0.7, 0.8]])
+    cell_types = np.array(['TypeA', 'TypeB', 'TypeA'])
+
+    # Initialize the SpatialTypeAnnCntMtx object.
+    mtx = SpatialTypeAnnCntMtx(count_matrix, spatial_coords, cell_types)
+    """
+
+    count_matrix: _csr_matrix
+    spatial_coords: _np.ndarray
+    cell_types: _NDArray[_np.str_]
+
+    def __post_init__(self):
+        """Ensure the consistency of input data."""
+        assert (
+            self.count_matrix.shape[0] == self.spatial_coords.shape[0]
+        ), "Number of rows in count_matrix must match the number of spatial coordinates."
+        assert (
+            self.count_matrix.shape[0] == self.cell_types.shape[0]
+        ), "Number of rows in count_matrix must match the number of cell type annotations."
+        if not isinstance(self.cell_types, _np.ndarray):
+            self.cell_types = _np.array(self.cell_types).astype(str)
+        assert isinstance(self.spatial_coords, _np.ndarray)
+        return
+
+
+def celltype_refined_bin(
+    ann_count_matrix: SpatialTypeAnnCntMtx,
+    bin_radius: float = 3.0,  # bin-7
+    bin_norm_p: int = 2,  # 2 for Euclidean and 1 for Manhattan
+    name_undefined: str = "Undefined",
+    verbose: bool = True,
+) -> SpatialTypeAnnCntMtx:
+    """
+    Aggregate each spot in the spatial transcriptome with its
+    neighboring spots of the same cell-type, based on a specified distance metric.
+
+    This function bins each spatial sample (spot) by aggregating the gene count data
+    of its neighboring spots that share the same cell-type annotation. The distance
+    between spots is measured based on the specified distance norm (e.g., Euclidean or
+    Manhattan). The result is a new `SpatialTypeAnnCntMtx` object with aggregated gene
+    counts for each spot, taking into account only the neighboring spots with the same cell type.
+
+    Parameters:
+    -----------
+    ann_count_matrix : SpatialTypeAnnCntMtx
+        A `SpatialTypeAnnCntMtx` object containing the gene count matrix, spatial coordinates,
+        and cell-type annotations. The function operates on this matrix to perform spatial binning
+        and aggregation.
+
+    bin_radius : float, optional (default=3.0)
+        The radius within which neighboring spots are considered for aggregation.
+        Spots that are within this radius of each other will be grouped together for aggregation.
+
+    bin_norm_p : int, optional (default=2)
+        The p-norm to use for distance computation between spots.
+        - `p=2` corresponds to the **Euclidean distance**.
+        - `p=1` corresponds to the **Manhattan distance**.
+
+    name_undefined : str, optional (default="Undefined")
+        The name of the undefined cell-type. Any aggregated sample with undefined type will
+        be removed from the final result.
+
+    Returns:
+    --------
+    SpatialTypeAnnCntMtx
+        A new `SpatialTypeAnnCntMtx` object with the aggregated gene counts for each spot,
+        where each spot's gene count has been updated by aggregating its own count and the
+        counts of its neighboring spots that share the same cell type.
+
+    Example:
+    --------
+    # Assuming ann_count_matrix is a valid SpatialTypeAnnCntMtx object
+    aggregated_mtx = celltype_refined_bin(
+        ann_count_matrix,
+        bin_radius=5.0,
+        bin_norm_p=2
+    )
+
+    # The result is a new SpatialTypeAnnCntMtx object with aggregated counts.
+    """
+    n_samples_raw: int = ann_count_matrix.count_matrix.shape[0]
+    bools_defined: _NDArray[_np.bool_] = ~(
+        ann_count_matrix.cell_types == name_undefined
+    )
+    ilocs_defined: _NDArray[_np.int_] = _np.arange(n_samples_raw)[bools_defined]
+    n_samples_def: int = len(ilocs_defined)
+    celltype_pool: set[str] = set(
+        _np.unique(ann_count_matrix.cell_types[bools_defined])
+    )
+    # Build distance matrix
+    if verbose:
+        _tqdm.write("Building spatial distance matrix..")
+    ckdtree_defined = _cKDTree(
+        data=ann_count_matrix.spatial_coords[bools_defined, :],
+    )
+    ckdtree_all = _cKDTree(
+        data=ann_count_matrix.spatial_coords,
+    )
+    dist_mat: _coo_matrix = ckdtree_defined.sparse_distance_matrix(
+        other=ckdtree_defined,
+        max_distance=bin_radius,
+        p=bin_norm_p,
+        output_type="coo_matrix",
+    )
+    del ckdtree_all
+    del ckdtree_defined
+    dist_dict: dict[str, _NDArray[_np.int_]] = {
+        "rows": dist_mat.row,
+        "cols": dist_mat.col,
+    }
+    del dist_mat
+    # Mask out those of different type
+    ilocs_items_keep: list[int] = []
+    itor_ = (
+        _tqdm(
+            celltype_pool,
+            desc="Building CTRBin",
+            ncols=60,
+        )
+        if verbose
+        else celltype_pool
+    )
+    for ct in itor_:
+        icols_this_ct: _NDArray[_np.int_] = _np.arange(n_samples_raw)[
+            ann_count_matrix.cell_types == ct
+        ]
+        irows_this_ct: _NDArray[_np.int_] = _np.arange(n_samples_def)[
+            ann_count_matrix.cell_types[bools_defined] == ct
+        ]
+        bools_items_keeprows: _NDArray[_np.bool_] = _np.isin(
+            element=dist_dict["rows"],
+            test_elements=irows_this_ct,
+        )
+        bools_subrows_keepcols: _NDArray[_np.bool_] = _np.isin(
+            element=dist_dict["cols"][bools_items_keeprows],
+            test_elements=icols_this_ct,
+        )
+        ilocs_items_keep_this_ct: _NDArray[_np.int_] = _np.arange(
+            dist_dict["rows"].shape[0]
+        )[bools_items_keeprows][bools_subrows_keepcols]
+        ilocs_items_keep += ilocs_items_keep_this_ct.tolist()
+
+    # Add diagonals
+    rows = _np.append(
+        arr=dist_dict["rows"],
+        values=_np.arange(n_samples_def),
+    )
+    cols = _np.append(
+        arr=dist_dict["cols"],
+        values=_np.arange(n_samples_def),
+    )
+    ilocs_items_keep += list(
+        range(dist_dict["rows"].shape[0], dist_dict["rows"].shape[0] + n_samples_def)
+    )
+    del dist_dict
+
+    # Building final weight matrix
+    data = _np.ones(
+        shape=(len(rows),),
+    )
+    weight_matrix: _coo_matrix = _coo_matrix(
+        (data, (rows, cols)),
+        shape=(n_samples_def, n_samples_raw),
+    ).astype(float)
+
+    weight_matrix: _csr_matrix = weight_matrix.tocsr()
+
+    # Get result
+    return SpatialTypeAnnCntMtx(
+        count_matrix=weight_matrix @ ann_count_matrix.count_matrix,
+        spatial_coords=ann_count_matrix.spatial_coords[bools_defined, :],
+        cell_types=ann_count_matrix.cell_types[bools_defined],
+    )
+
+
 # Utilities
 def cluster_spatial_domain(
     coords: _NDArray[_np.float_],

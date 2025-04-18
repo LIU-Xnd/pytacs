@@ -560,11 +560,13 @@ def celltype_refined_bin(
         ann_count_matrix.cell_types == name_undefined
     )
     if fraction_subsampling > 0.0:
-        if verbose:
-            _tqdm.write(f"Subsampling {fraction_subsampling:%}..")
         n_subsample: int = int(round(fraction_subsampling * len(bools_defined)))
         n_subsample = max(1, n_subsample)
         n_subsample = min(len(bools_defined), n_subsample)
+        if verbose:
+            _tqdm.write(
+                f"Subsampling {fraction_subsampling:%} i.e. {n_subsample} samples.."
+            )
         ilocs_keep_from_defined: _NDArray[_np.int_] = _np.random.choice(
             a=_np.arange(int(_np.sum(bools_defined))),
             size=n_subsample,

@@ -559,7 +559,7 @@ def celltype_refined_bin(
     bools_defined: _NDArray[_np.bool_] = ~(
         ann_count_matrix.cell_types == name_undefined
     )
-    if fraction_subsampling > 0.0:
+    if fraction_subsampling < 1.0:
         n_subsample: int = int(round(fraction_subsampling * len(bools_defined)))
         n_subsample = max(1, n_subsample)
         n_subsample = min(len(bools_defined), n_subsample)

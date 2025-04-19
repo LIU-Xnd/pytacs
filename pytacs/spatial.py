@@ -650,6 +650,8 @@ def celltype_refined_bin(
     del dist_dict
 
     # Building final weight matrix
+    rows = rows[ilocs_items_keep]
+    cols = cols[ilocs_items_keep]
     data = _np.ones(
         shape=(len(rows),),
     )

@@ -11,6 +11,7 @@
 # - Improved local classifier strategy - higher inferencing accuracy;
 
 
+__author__ = "Liu, Xindong"
 __version__ = "1.7.9"
 
 from .data import AnnDataPreparer, downsample_cells, compare_umap

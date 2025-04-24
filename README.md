@@ -24,7 +24,7 @@ Ideas are inspired by (Benjamin et al., 2024)'s work TopACT
 (see https://gitlab.com/kfbenjamin/topact).
 But Pytacs has improved it in several ways:
 
-1. The shape of predicted cells are diverse rather than a rectangle/grid, rendering hopefully higher accuracy;
+1. The shape of predicted cells can be diverse rather than a rectangle/grid, rendering hopefully higher accuracy;
 2. Random-Walk-based aggregation strategy with comparative computational speed, making it more
 "topology-aware", and rendering hopefully higher accuracy especially at cell boundaries;
 3. Bootstrap downsampling strategy is adopted for generating ref scRNA-seq, making it
@@ -42,6 +42,7 @@ For developers using Poetry,
 the dependencies lock file is `poetry.lock` and the project information
 including main dependencies is listed in `pyproject.toml`. 
 
+To use it for downstream analysis in combination with Squidpy, it is recommended to use a seperate virtual environment to install Squidpy.
 
 ## Usage
 
@@ -80,9 +81,18 @@ For detailed usage, see [Basic_Usage_of_pytacs.md](./Basic_Usage_of_pytacs.md)
     y=data_prep.sp_adata.obsm['spatial'][:,1],
     hue=ct_full,
 )
+
+# Get refined binned pseudo-single-cell spatial transcriptomics 
+>>> ann_mtx = tax.SpatialTypeAnnCntMtx(
+    count_matrix,
+    spatial_coords,
+    cell_types,
+)
+>>> ann_mtx_sc = tax.celltype_refined_bin(
+    ann_mtx,
+)
 ```
 
 ## Demo
-(Deprecated)
 
 [Demo](./data/demo/demo.ipynb)

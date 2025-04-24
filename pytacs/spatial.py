@@ -705,6 +705,7 @@ def cluster_spatial_domain(
         p=2,
         output_type="coo_matrix",
     )
+    dist_matrix: _csr_matrix = dist_matrix.tocsr()
 
     # Create celltype-proportion observation matrix
     celltypes_unique: _NDArray[_np.str_] = _np.sort(

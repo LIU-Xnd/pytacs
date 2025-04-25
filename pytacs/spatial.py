@@ -11,6 +11,7 @@ from scipy.spatial import cKDTree as _cKDTree  # to construct sparse distance ma
 
 from scipy.cluster.hierarchy import linkage as _linkage
 from scipy.cluster.hierarchy import fcluster as _fcluster
+from sklearn.cluster import MiniBatchKMeans as _MiniBatchKMeans
 
 from .classifier import _LocalClassifier
 from .utils import to_array as _to_array
@@ -676,7 +677,11 @@ def cluster_spatial_domain(
     cell_types: _NDArray[_np.str_],
     radius_local: float = 10.0,
     n_clusters: int = 9,
-) -> _NDArray[_np.int_]:
+    algorithm: _Literal["agglomerative", "kmeans"] = "agglomerative",
+    on_grids: bool = True,
+    return_grids_coords: bool = True,
+    grid_size: float = 10.0,
+) -> _NDArray[_np.int_] | tuple[_NDArray[_np.int_], _NDArray[_np.float_]]:
     """
     Cluster spatial spots into many domains based on
     cell-tpye proportion.
@@ -686,9 +691,12 @@ def cluster_spatial_domain(
         cell_types: array of cell types of each spot.
         radius_local: radius of sliding window to compute cell-type proportion.
         n_clusters: number of clusters generated.
+        on_grids: if True, clusters grids coordinates instead of spots coords (recommended for memory ease).
+        grid_size: if `on_grid` is True, specifies the unit size of each grid.
 
     Return:
-        array of cluster indices in corresponding order.
+        tuple[_NDArray[_np.int_], _NDArray[_np.float_]]: (domain_ids, grids_coordinates), if `return_grids_coords`;
+        otherwise _NDArray[_np.int_], an array of cluster indices in corresponding order.
     """
     # Validate params
     n_samples: int = coords.shape[0]
@@ -696,11 +704,38 @@ def cluster_spatial_domain(
     assert coords.shape[1] == 2
     assert len(coords.shape) == 2
     assert len(cell_types.shape) == 1
+    assert algorithm in ["agglomerative", "kmeans"]
+    if n_clusters > 10:
+        _tqdm.write(f"Warning: {n_clusters=} could be large, might be a memory hog")
 
     # Create distance matrix
-    ckdtree = _cKDTree(coords)
-    dist_matrix: _coo_matrix = ckdtree.sparse_distance_matrix(
-        other=ckdtree,
+    # Build grids
+    if on_grids:
+        xmin = _np.min(coords[:, 0])
+        xmax = _np.max(coords[:, 0])
+        ymin = _np.min(coords[:, 1])
+        ymax = _np.max(coords[:, 1])
+        Xs = _np.arange(
+            start=xmin,
+            stop=xmax,
+            step=grid_size,
+        )
+        Ys = _np.arange(
+            start=ymin,
+            stop=ymax,
+            step=grid_size,
+        )
+        coords_grids = _np.array([[x, y] for x in Xs for y in Ys])
+        del Xs
+        del Ys
+    else:
+        coords_grids = coords
+    ckdtree_grids = _cKDTree(coords_grids)
+
+    n_grids: int = coords_grids.shape[0]
+    ckdtree_spots = _cKDTree(coords)
+    dist_matrix: _coo_matrix = ckdtree_grids.sparse_distance_matrix(
+        other=ckdtree_spots,
         max_distance=radius_local,
         p=2,
         output_type="coo_matrix",
@@ -712,31 +747,52 @@ def cluster_spatial_domain(
         _np.unique(cell_types)
     )  # alphabetically sort
     obs_matrix: _NDArray[_np.float_] = _np.zeros(
-        shape=(n_samples, cell_types.shape[0]),
+        shape=(n_grids, celltypes_unique.shape[0]),
         dtype=float,
     )
-    for i_sample in _tqdm(
-        range(n_samples),
+    for i_grid in _tqdm(
+        range(n_grids),
         desc="Compute celltype proportions",
         ncols=60,
     ):
-        dist_nbors = _to_array(dist_matrix[i_sample, :], squeeze=True)
-        dist_nbors[i_sample] = 1.0
+        dist_nbors = _to_array(dist_matrix[i_grid, :], squeeze=True)
         iloc_nbors = _np.where(dist_nbors > 0)[0]
+        if len(iloc_nbors) == 0:
+            continue
         ct_nbors = cell_types[iloc_nbors]
         for i_ct, ct in enumerate(celltypes_unique):
-            obs_matrix[i_sample, i_ct] = (ct_nbors == ct).mean()
+            obs_matrix[i_grid, i_ct] = (ct_nbors == ct).mean()
 
-    # Agglomerative cluster
-    _tqdm.write("Agglomerative clustering ...")
-    Z = _linkage(
-        obs_matrix,
-        method="ward",
-    )
-    cluster_labels = _fcluster(
-        Z,
-        t=n_clusters,
-        criterion="maxclust",
-    )
-    _tqdm.write("Done.")
-    return cluster_labels
+    if algorithm == "agglomerative":
+        # Agglomerative cluster
+        _tqdm.write("Agglomerative clustering..")
+        Z = _linkage(
+            obs_matrix,
+            method="ward",
+        )
+        cluster_labels = _fcluster(
+            Z,
+            t=n_clusters,
+            criterion="maxclust",
+        )
+        _tqdm.write("Done.")
+    else:
+        # Kmeans
+        _tqdm.write("KMeans clustering..")
+        kmeans = _MiniBatchKMeans(
+            n_clusters=n_clusters,
+            n_init=1,
+            verbose=1,
+        )
+        cluster_labels = kmeans.fit_predict(
+            X=obs_matrix,
+        )
+        _tqdm.write("Done.")
+
+    if return_grids_coords:
+        return (
+            cluster_labels,
+            coords_grids,
+        )
+    else:
+        return cluster_labels

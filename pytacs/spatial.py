@@ -35,6 +35,7 @@ class AggregationResult:
             ["cell_id"]: (int) centroid spot id
             ["cell_type"]: (str) cell-type name
             ["confidence"]: (float) probability of that class
+            (optional ["cell_size"]: (int) pixels in each cell)
 
         .expr_matrix (csr_matrix[float]): aggregated expression matrix of confident spots
 
@@ -62,6 +63,7 @@ def rw_aggregate(
     trim_proportion: float = 0.5,
     mode_walk: _Literal["rw"] = "rw",
     return_weight_matrix: bool = False,
+    return_cell_sizes: bool = True,
     verbose: bool = True,
 ) -> AggregationResult:
     """
@@ -123,8 +125,12 @@ def rw_aggregate(
             'rwr' for random walk with restart. Default is 'rw'.
 
         return_weight_matrix (bool, optional):
-            If True, will return weight_matrix in AggregationResult. Note this process may drastically increase
+            If True, will return weight_matrix in AggregationResult. Note this process may increase
             computational time!
+
+        return_cell_sizes (bool, optional):
+            If True, will return cellsizes of confident cells in AggregationResult.dataframe. This process can
+            help improve binning accuracy for downstream analysis.
 
     Returns:
         AggregationResult:
@@ -132,7 +138,7 @@ def rw_aggregate(
                 - `dataframe`: DataFrame with predicted `cell_id`, `cell_type`, and confidence scores.
                 - `expr_matrix`: CSR matrix of aggregated expression for confident spots.
                 - `weight_matrix`: CSR matrix representing transition probabilities between all spots, if `return_weight_matrix`;
-                otherwise an empty matrix.
+                otherwise an empty matrix of the same shape.
     """
     assert mode_embedding in ["raw", "pc"]
     assert mode_metric in ["inv_dist", "cosine"]
@@ -198,13 +204,18 @@ def rw_aggregate(
     )
     del ilocs_propagation
     rows_nonzero = _np.concatenate(
-        [rows_nonzero, _np.arange(distances_propagation.shape[0])]
+        [
+            rows_nonzero,
+            _np.arange(distances_propagation.shape[0]),
+        ]  # including selves (diagonals)
     )
     cols_nonzero = _np.concatenate(
-        [cols_nonzero, _np.arange(distances_propagation.shape[0])]
+        [cols_nonzero, _np.arange(distances_propagation.shape[0])]  # including selves
     )
     del distances_propagation
-    query_pool_propagation = set(zip(rows_nonzero, cols_nonzero))
+    query_pool_propagation = set(
+        zip(rows_nonzero, cols_nonzero)
+    )  # all possible nonzero ilocs for propagation
     del rows_nonzero
     del cols_nonzero
     distances = _lil_matrix(
@@ -242,27 +253,32 @@ def rw_aggregate(
         _np.arange(similarities.shape[0]), _np.arange(similarities.shape[0])
     ] = 1.0
     similarities: _csr_matrix = similarities.tocsr()
-    # Normalize similarities row-wise
-    similarities = _normalize_csr(similarities)
 
-    # candidate cellids, gonna shrink with iterations
-    candidate_cellids = _np.arange(st_anndata.shape[0])
-    # cellids confident, gonna bloat with iters
-    cellids_confident = []
-    # celltypes corrsponding to cellids_confident, gonna bloat
-    celltypes_confident = []
-    # confidences corresponding to celltypes_confident, gonna bloat
-    confidences_confident = []
-    # final weight_matrix of all spots, gonna update
-    # weight_matrix = _lil_matrix((similarities.shape[0], similarities.shape[1]))
-    # Modified: using efficient construction with coo
+    similarities = _normalize_csr(
+        similarities
+    )  # Normalize similarities row-wise, making it probability-like
+
+    candidate_cellids = _np.arange(
+        st_anndata.shape[0]
+    )  # candidate (yet-undefined) cellids, gonna pop items with iterations
+    cellids_confident = []  # cellids confident, gonna append items with iters
+    celltypes_confident = (
+        []
+    )  # celltypes corrsponding to cellids_confident, gonna append items
+    confidences_confident = (
+        []
+    )  # confidences corresponding to celltypes_confident, gonna append items
+    cellsizes_confident = (
+        []
+    )  # cellsizes (in pixels) corresponding to cellids_confident, gonna append items
     weight_matrix: dict = {
         "rows": [],
         "cols": [],
         "data": [],
-    }
+    }  # final weight_matrix of all spots, gonna update
+
     # Random Walk
-    counter_celltypes_global = dict()
+    counter_celltypes_global = dict()  # counter of celltypes total
     for i_iter in range(max_iter):
         # Aggregate spots according to similarities
         if mode_aggregation == "unweighted":
@@ -288,7 +304,7 @@ def rw_aggregate(
         whr_confident_candidate: _NDArray[_np.bool_] = (
             confidences_candidate >= classifier._threshold_confidence
         )
-        counter_celltypes = dict()
+        counter_celltypes = dict()  # counter of celltypes for this round
         ave_conf = 0.0
         if verbose:
             _itor = _tqdm(
@@ -309,15 +325,18 @@ def rw_aggregate(
                 celltypes_confident.append(typename)
                 confidences_confident.append(conf)
                 if return_weight_matrix:
-                    # weight_matrix[cellid, :] = similarities[cellid, :]
-                    # Modified version with coo
                     weight_matrix["rows"].append(cellid)
-                    cols_nonzero = similarities.getrow(cellid).nonzero()[1]
+                    cols_nonzero = list(
+                        similarities.getrow(cellid).nonzero()[1]
+                    )  # FIXBUG: add list(..)
                     weight_matrix["cols"] += cols_nonzero
                     weight_matrix["data"] += _to_array(
                         similarities[cellid, cols_nonzero],
                         squeeze=True,
                     ).tolist()
+                if return_cell_sizes:
+                    cols_nonzero = list(similarities.getrow(cellid).nonzero()[1])
+                    cellsizes_confident.append(len(cols_nonzero))
                 counter_celltypes[typename] = counter_celltypes.get(typename, 0) + 1
                 counter_celltypes_global[typename] = (
                     counter_celltypes_global.get(typename, 0) + 1
@@ -377,7 +396,7 @@ def rw_aggregate(
     )
     weight_matrix: _csr_matrix = weight_matrix.tocsr()
     # Construct Results
-    return AggregationResult(
+    result = AggregationResult(
         dataframe=_pd.DataFrame(
             {
                 "cell_id": cellids_confident,
@@ -388,6 +407,9 @@ def rw_aggregate(
         expr_matrix=similarities[cellids_confident, :] @ st_anndata.X,
         weight_matrix=weight_matrix,
     )
+    if return_cell_sizes:
+        result.dataframe["cell_size"] = cellsizes_confident
+    return result
 
 
 def extract_celltypes_full(
@@ -566,7 +588,7 @@ def celltype_refined_bin(
         n_subsample = min(len(bools_defined), n_subsample)
         if verbose:
             _tqdm.write(
-                f"Subsampling {fraction_subsampling:%} i.e. {n_subsample} samples.."
+                f"Subsampling {fraction_subsampling:.2%} i.e. {n_subsample} samples.."
             )
         ilocs_keep_from_defined: _NDArray[_np.int_] = _np.random.choice(
             a=_np.arange(int(_np.sum(bools_defined))),

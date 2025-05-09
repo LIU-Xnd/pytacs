@@ -1,12 +1,19 @@
 """A new version of spatial strategy based on Randon Walk, with fast computation,
 low mem cost, and robust performance."""
 
-from scanpy import AnnData as _AnnData
+from .types import (
+    _AnnData,
+    _NDArray,
+    _csr_matrix,
+    _coo_matrix,
+    _lil_matrix,
+    _Literal,
+    _UndefinedType,
+    _UNDEFINED,
+    _1DArrayType,
+    _Nx2ArrayType,
+)
 import numpy as _np
-from numpy.typing import NDArray as _NDArray
-from scipy.sparse import csr_matrix as _csr_matrix
-from scipy.sparse import coo_matrix as _coo_matrix
-from scipy.sparse import lil_matrix as _lil_matrix
 from scipy.spatial import cKDTree as _cKDTree  # to construct sparse distance matrix
 
 from scipy.cluster.hierarchy import linkage as _linkage
@@ -19,7 +26,6 @@ from .utils import to_array as _to_array
 from tqdm import tqdm as _tqdm
 from dataclasses import dataclass as _dataclass
 import pandas as _pd
-from typing import Literal as _Literal
 from sklearn.decomposition import TruncatedSVD as _TruncatedSVD
 from .utils import normalize_csr as _normalize_csr
 from .utils import trim_csr_per_row as _trim_csr_per_row
@@ -35,7 +41,7 @@ class AggregationResult:
             ["cell_id"]: (int) centroid spot id
             ["cell_type"]: (str) cell-type name
             ["confidence"]: (float) probability of that class
-            (optional ["cell_size"]: (int) pixels in each cell)
+            (optional ["cell_size"]: (int) spots in each cell)
 
         .expr_matrix (csr_matrix[float]): aggregated expression matrix of confident spots
 
@@ -270,7 +276,7 @@ def rw_aggregate(
     )  # confidences corresponding to celltypes_confident, gonna append items
     cellsizes_confident = (
         []
-    )  # cellsizes (in pixels) corresponding to cellids_confident, gonna append items
+    )  # cellsizes (in spots) corresponding to cellids_confident, gonna append items
     weight_matrix: dict = {
         "rows": [],
         "cols": [],
@@ -549,8 +555,8 @@ def celltype_refined_bin(
 
     bin_norm_p : int, optional (default=2)
         The p-norm to use for distance computation between spots.
-        - `p=2` corresponds to the **Euclidean distance**.
-        - `p=1` corresponds to the **Manhattan distance**.
+        - `p=2` corresponds to the Euclidean distance.
+        - `p=1` corresponds to the Manhattan distance.
 
     name_undefined : str, optional (default="Undefined")
         The name of the undefined cell-type. Any aggregated sample with undefined type will
@@ -691,6 +697,192 @@ def celltype_refined_bin(
         spatial_coords=ann_count_matrix.spatial_coords[bools_defined, :],
         cell_types=ann_count_matrix.cell_types[bools_defined],
     )
+
+
+@_dataclass
+class SpTypeSizeAnnCntMtx:
+    """
+    A data class representing a gene count matrix with spatial coordinates,
+    annotated cell types, and estimated cell sizes.
+
+    Attributes:
+    -----------
+    count_matrix : scipy.sparse.csr_matrix
+        A sparse matrix of shape (n_samples, n_genes) where each entry represents
+        the count of a specific gene in a specific sample (or spatial location).
+
+    spatial_coords : numpy.ndarray
+        A 2D array of shape (n_samples, 2), where each row contains the spatial
+        coordinates (e.g., x, y) corresponding to the sample or cell.
+
+    cell_types : numpy.ndarray
+        A 1D array of length n_samples where each element is a string representing
+        the cell type annotation for the corresponding sample or cell.
+
+    cell_sizes: numpy.ndarray
+        A 1D array of length n_samples where each element is an integer representing
+        the cell size (in spots) annotation for the corresponding sample or cell.
+
+    Assertions:
+    -----------
+    - The number of rows in `count_matrix` must match the number of rows in `spatial_coords`
+      (i.e., the number of spatial locations).
+    - The number of rows in `count_matrix` must also match the number of entries in `cell_types`
+      (i.e., the number of annotated cell types), and `cell_sizes`.
+
+    Example:
+    --------
+    # Create a sparse count matrix, spatial coordinates, and cell types.
+    count_matrix = csr_matrix([[5, 3], [4, 2], [6, 1]])
+    spatial_coords = np.array([[0.1, 0.2], [0.4, 0.5], [0.7, 0.8]])
+    cell_types = np.array(['TypeA', 'TypeB', 'TypeA'])
+    cell_sizes = np.array([5, 6, 3])
+
+    # Initialize the SpatialTypeAnnCntMtx object.
+    mtx = SpTypeSizeAnnCntMtx(count_matrix, spatial_coords, cell_types, cell_sizes)
+    """
+
+    count_matrix: _csr_matrix
+    spatial_coords: _Nx2ArrayType  # of _NumberType
+    cell_types: _1DArrayType  # of str
+    cell_sizes: _1DArrayType  # of int
+    cell_mask: _1DArrayType | _UndefinedType = _UNDEFINED  # of int
+
+    def __post_init__(self):
+        """Ensure the consistency of input data."""
+        assert (
+            self.count_matrix.shape[0] == self.spatial_coords.shape[0]
+        ), "Number of rows in count_matrix must match the number of spatial coordinates."
+        assert (
+            self.count_matrix.shape[0] == self.cell_types.shape[0]
+        ), "Number of rows in count_matrix must match the number of cell type annotations."
+        if not isinstance(self.cell_types, _np.ndarray):
+            self.cell_types = _np.array(self.cell_types).astype(str)
+        assert (
+            self.count_matrix.shape[0] == self.cell_sizes.shape[0]
+        ), "Number of rows in count_matrix must match the number of cell size annotations"
+        if not isinstance(self.cell_sizes, _np.ndarray):
+            self.cell_sizes = _np.array(self.cell_sizes).astype(self.cell_sizes.dtype)
+        assert isinstance(self.spatial_coords, _np.ndarray)
+        if not isinstance(self.cell_mask, _UndefinedType):
+            assert self.cell_mask.shape[0] == self.count_matrix.shape[0]
+        return
+
+
+# A newer version of celltype_refined_bin with cell_size estimated
+def ctrbin_cellseg(
+    ann_count_matrix: SpTypeSizeAnnCntMtx,
+    coeff_overlap_constraint: float = 1.0,
+    bin_norm_p: int = 2,  # 2 for Euclidean and 1 for Manhattan
+    verbose: bool = True,
+) -> _1DArrayType:
+    """
+    Cell-Type-Refined Bin with cell-size estimated.
+
+    Aggregate each spot in the spatial transcriptome with its
+    neighboring spots of the same cell-type. The number of aggregated spots within a cell
+    will be no less than corresponding entries in `ann_count_matrix.cell_sizes`
+
+    This function bins each spatial sample (spot) by aggregating the gene count data
+    of its neighboring spots that share the same cell-type annotation. The distance
+    between spots is measured based on the specified distance norm (e.g., Euclidean or
+    Manhattan). The result is a 1d-array of cell id masks, with -1 indicating not-assigned.
+
+    Parameters:
+    -----------
+    ann_count_matrix : SpatialTypeAnnCntMtx
+        A `SpatialTypeAnnCntMtx` object containing the gene count matrix, spatial coordinates,
+        and cell-type annotations. The function operates on this matrix to perform spatial binning
+        and aggregation.
+
+    coeff_overlap_constraint : float, optional (default=1.0)
+        A coefficient used to constrain cell overlap. In detail, an estimated range is used for
+        removing cell centroids that are too close. This coefficient is used to multiply the
+        range so it increases (>1, resulting in less cells) or decreases (<1, resulting in more
+        cells) a little bit.
+
+    bin_norm_p : int, optional (default=2)
+        The p-norm to use for distance computation between spots.
+        - `p=2` corresponds to the Euclidean distance.
+        - `p=1` corresponds to the Manhattan distance.
+
+    name_undefined : str, optional (default="Undefined")
+        The name of the undefined cell-type. Any aggregated sample with undefined type will
+        be removed from the final result.
+
+    fraction_subsampling : float, optional (default=1.0)
+        The fraction of samples to randomly subsample, 0.0 to 1.0, to reduce memory taken.
+
+    Returns:
+    --------
+    The result is a 1d-array of cell id masks, with -1 indicating not-assigned.
+    """
+    n_samples_raw: int = ann_count_matrix.count_matrix.shape[0]
+    # Estimate overlap ranges by coeff * 2 * sqrt(S/pi)
+    ranges_overlap: _1DArrayType = (
+        coeff_overlap_constraint * 2 * _np.sqrt(ann_count_matrix.cell_sizes / _np.pi)
+    )
+    # Calculate n_counts for each spot
+    ns_counts: _1DArrayType = _to_array(
+        ann_count_matrix.count_matrix.sum(axis=1), squeeze=True
+    )
+    ix_sorted_by_counts: _1DArrayType = _np.argsort(ns_counts)[::-1]
+    ckdtree_spots: _cKDTree = _cKDTree(ann_count_matrix.spatial_coords)
+    dist_matrix: _csr_matrix = _csr_matrix(
+        ckdtree_spots.sparse_distance_matrix(
+            other=ckdtree_spots,
+            max_distance=_np.max(ranges_overlap),
+            p=bin_norm_p,
+        )
+    )
+    cell_candidates_bool: _1DArrayType = _np.ones(
+        shape=(n_samples_raw,),
+        dtype=_np.bool_,
+    )
+    cell_masks: _1DArrayType = (
+        _np.zeros(
+            shape=(n_samples_raw,),
+            dtype=_np.int_,
+        )
+        - 1
+    )  # -1 indicates for unassigned
+    if verbose:
+        itor_ = _tqdm(
+            range(n_samples_raw),
+            desc="Finding cells",
+            ncols=60,
+        )
+    else:
+        itor_ = range(n_samples_raw)
+    for _i in itor_:
+        i_centroid: int = ix_sorted_by_counts[_i]
+        # If removed, skip.
+        if cell_candidates_bool[i_centroid] is False:
+            continue
+        ix_nbors: _1DArrayType = dist_matrix.getrow(i_centroid).nonzero()[1]
+        # Filter out different types
+        label_centroid: str = ann_count_matrix.cell_types[i_centroid]
+        whr_sametype: _1DArrayType = (
+            ann_count_matrix.cell_types[ix_nbors] == label_centroid
+        )
+        ix_nbors = ix_nbors[whr_sametype]
+        if len(ix_nbors) == 0:
+            cell_masks[i_centroid] = i_centroid
+            continue
+        dists_nbors: _1DArrayType = _to_array(
+            dist_matrix[i_centroid, ix_nbors], squeeze=True
+        )
+        # Find neighbors of estimated size
+        ix_aggregate = ix_nbors[
+            _np.argsort(dists_nbors)[
+                : max(0, ann_count_matrix.cell_sizes[i_centroid] - 1)
+            ]
+        ]
+        cell_masks[ix_aggregate] = i_centroid
+        cell_masks[i_centroid] = i_centroid
+        # Remove too-close from centroid candidates
+        cell_candidates_bool[ix_nbors[dists_nbors < ranges_overlap[i_centroid]]] = False
+    return cell_masks
 
 
 # Utilities

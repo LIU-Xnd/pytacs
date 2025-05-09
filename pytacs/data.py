@@ -1,26 +1,27 @@
-from scanpy import AnnData as _AnnData
+from .types import (
+    _AnnData,
+    _Axes,
+    _NDArray,
+    _csr_matrix,
+    _dok_matrix,
+    _Literal,
+    _UNDEFINED,
+    _UndefinedType,
+)
 
 import scanpy as _sc
 import pandas as _pd
 import numpy as _np
-from matplotlib.axes import Axes as _Axes
 
-from numpy.typing import NDArray as _NDArray
-from scipy.sparse import csr_matrix as _csr_matrix
-from scipy.sparse import dok_matrix as _dok_matrix
+
 from scipy.spatial import cKDTree as _cKDTree
 
 from scipy.cluster.hierarchy import linkage as _linkage
 from scipy.cluster.hierarchy import fcluster as _fcluster
 
-from sklearn.svm import SVC as _SVC
-
-from typing import Literal as _Literal
-from typing import Iterator as _Iterator
 
 from tqdm import tqdm as _tqdm
 from .utils import reinit_index as _reinit_index
-from .utils import _UNDEFINED, _UndefinedType
 from .utils import to_array as _to_array
 from .utils import truncate_top_n as _truncate_top_n
 

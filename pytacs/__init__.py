@@ -12,7 +12,7 @@
 
 
 __author__ = "Liu, Xindong"
-__version__ = "1.7.9"
+__version__ = "1.8.0"
 
 from .data import AnnDataPreparer, downsample_cells, compare_umap
 from .classifier import (
@@ -28,4 +28,17 @@ from .spatial import (
     cluster_spatial_domain,
     SpatialTypeAnnCntMtx,
     celltype_refined_bin,
+    ctrbin_cellseg,
+    SpTypeSizeAnnCntMtx,
 )
+from .plot import (
+    SpAnnPoints,
+    get_boundaries,
+    plot_boundaries,
+    plot_boundaries_on_grids,
+)
+
+import data
+import classifier
+import spatial
+import plot

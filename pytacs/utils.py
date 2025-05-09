@@ -1,65 +1,25 @@
 import numpy as _np
-from scanpy import AnnData as _AnnData
-from scipy.sparse import csr_matrix as _csr_matrix
-from scipy.sparse import coo_matrix as _coo_matrix
-from scipy.sparse import dok_matrix as _dok_matrix
-from scipy.sparse import lil_matrix as _lil_matrix
 from scipy.sparse import issparse as _issparse
 from scipy.sparse import eye as _eye
-from numpy import matrix as _matrix
-from numpy.typing import NDArray as _NDArray
-from typing import Iterator as _Iterator
 from tqdm import tqdm as _tqdm
 
 
-# Placeholder type
-class _UndefinedType:
-    def copy(self):
-        return self
-
-    def __repr__(self):
-        return "_UNDEFINED"
-
-
-# Alias
-_Undefined = _UndefinedType
-
-_UNDEFINED = _UndefinedType()
-
-
-# >>> --- I/O operations ---
-def read_list(filepath: str) -> list[str]:
-    """Read list from txt, sep by \n. Strings are .rstrip()'d."""
-    with open(filepath) as f:
-        return [line.rstrip() for line in f]
+from .types import (
+    _AnnData,
+    _NDArray,
+    _UndefinedType,
+    _UNDEFINED,
+    _Iterable,
+    _matrix,
+    _csr_matrix,
+    _coo_matrix,
+    _dok_matrix,
+    _lil_matrix,
+)
 
 
-def combine_to_str(*arg, sep: str = ",") -> str:
-    """Combine arguments into a string.
-    For example, `combine_to_str(1,2) -> '1,2'`."""
-    args_to_str = [str(a) for a in arg]
-    return sep.join(args_to_str)
-
-
-def extract_ints_from_str(string_: str, sep: str = ",") -> list[int]:
-    """Extract a list of integers from a string.
-    For example, `extract_ints_from_str('1,2') -> [1,2]`."""
-    return list(map(int, string_.split(sep)))
-
-
-def print_newlines(*args, sep: str = "\n") -> None:
-    """Print args one by one, seperated by newline."""
-    print(*args, sep=sep)
-    return None
-
-
-# --- I/O operations --- <<<
-
-
-# >>> --- Reshaping operations ---
-
-
-def find_indices(lst1: _Iterator, lst2: _Iterator) -> _NDArray[_np.int_]:
+# >>> Reshaping operations
+def find_indices(lst1: _Iterable, lst2: _Iterable) -> _NDArray[_np.int_]:
     """Returns an array of indices where elements of lst1 appear in lst2, or -1 if not found.
 
     Example:
@@ -107,7 +67,7 @@ def reinit_index(
     return
 
 
-# --- Reshaping operations --- <<<
+# <<< End of Reshaping operations
 
 
 def radial_basis_function(
@@ -161,10 +121,6 @@ def to_array(
     if squeeze:
         X = X.ravel().copy()
     return X
-
-
-# def deepcopy_dict(d: dict[int, list]) -> dict:
-#     return {k: v.copy() for k, v in d.items()}
 
 
 def truncate_top_n(

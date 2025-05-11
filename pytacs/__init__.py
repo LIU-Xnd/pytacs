@@ -37,8 +37,3 @@ from .plot import (
     plot_boundaries,
     plot_boundaries_on_grids,
 )
-
-import data
-import classifier
-import spatial
-import plot

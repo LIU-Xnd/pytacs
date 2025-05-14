@@ -11,6 +11,7 @@ from .types import (
     _UndefinedType,
     _UNDEFINED,
     _1DArrayType,
+    _NumberType,
     _Nx2ArrayType,
 )
 import numpy as _np
@@ -30,6 +31,37 @@ from sklearn.decomposition import TruncatedSVD as _TruncatedSVD
 from .utils import normalize_csr as _normalize_csr
 from .utils import trim_csr_per_row as _trim_csr_per_row
 from .utils import rowwise_cosine_similarity as _rowwise_cosine_similarity
+from itertools import product as _product
+from multiprocessing.pool import Pool as _Pool
+
+
+def spatial_distances(
+    sp_adata: _AnnData,
+    max_spatial_distance: _NumberType,
+    p_norm: _NumberType = 2,
+    verbose: bool = True,
+) -> None:
+    """Computes spatial distances matrix in csr_matrix format. Saved in place."""
+    if verbose:
+        _tqdm.write('Loading spatial coordinates from .obsm["spatial"]..')
+    ckdtree_spatial = _cKDTree(sp_adata.obsm["spatial"])
+    if verbose:
+        _tqdm.write("Building spatial distances, might take up large memory..")
+    distances_propagation = _csr_matrix(
+        ckdtree_spatial.sparse_distance_matrix(
+            other=ckdtree_spatial,
+            max_distance=max_spatial_distance,
+            p=p_norm,
+        )
+    )
+    distances_propagation.eliminate_zeros()
+    sp_adata.obsp["spatial_distances"] = _csr_matrix(distances_propagation)
+    sp_adata.uns["max_spatial_distance"] = max_propagation_radius
+    if verbose:
+        _tqdm.write(
+            'Saved in .obsp["spatial_distances"]. Related param saved in .uns["max_spatial_distance"]'
+        )
+    return
 
 
 @_dataclass
@@ -188,17 +220,38 @@ def rw_aggregate(
     # Get spatial neighborhood
     if verbose:
         _tqdm.write(f"Constructing spatial graph..")
-    ckdtree_spatial = _cKDTree(st_anndata.obsm["spatial"])
-    distances_spatial = ckdtree_spatial.sparse_distance_matrix(
-        other=ckdtree_spatial,
-        max_distance=nbhd_radius,
-        output_type="coo_matrix",
+    # Try to load from .obsp
+    if verbose:
+        _tqdm.write(f'Trying to load from cache .obsp["spatial_distances"]..')
+        if "spatial_distances" in st_anndata.obsp:
+            distances_propagation = _coo_matrix(st_anndata.obsp["spatial_distances"])
+        else:
+            if verbose:
+                _tqdm.write(f"Cache not found. Computing..")
+            spatial_distances(
+                sp_adata=st_anndata,
+                max_spatial_distance=max_propagation_radius,
+                p_norm=2,
+                verbose=verbose,
+            )
+            distances_propagation: _coo_matrix = _coo_matrix(
+                st_anndata.obsp["spatial_distances"]
+            )
+    # Construct spatial dist matrix
+    distances_propagation.eliminate_zeros()
+    spatial_rows = distances_propagation.nonzero()[0]
+    spatial_cols = distances_propagation.nonzero()[1]
+    spatial_data = distances_propagation.data
+    whr_within_nbhd = spatial_data <= nbhd_radius
+
+    distances_spatial = _coo_matrix(
+        (
+            spatial_data[whr_within_nbhd],
+            (spatial_rows[whr_within_nbhd], spatial_cols[whr_within_nbhd]),
+        ),
+        shape=distances_propagation.shape,
     )
-    distances_propagation = ckdtree_spatial.sparse_distance_matrix(
-        other=ckdtree_spatial,
-        max_distance=max_propagation_radius,
-        output_type="coo_matrix",
-    )
+    del spatial_data, spatial_cols, spatial_rows
     # Boundaries for propagation
     ilocs_propagation = _np.array(
         list(zip(distances_propagation.row, distances_propagation.col))
@@ -480,9 +533,9 @@ class SpatialTypeAnnCntMtx:
         A sparse matrix of shape (n_samples, n_genes) where each entry represents
         the count of a specific gene in a specific sample (or spatial location).
 
-    spatial_coords : numpy.ndarray
-        A 2D array of shape (n_samples, 2), where each row contains the spatial
-        coordinates (e.g., x, y) corresponding to the sample or cell.
+    spatial_distances : csr_matrix
+        A 2D sparse array of shape (n_samples, n_samples), indicating distances between
+        each sample, with all distances above a threshold being set to zero.
 
     cell_types : numpy.ndarray
         A 1D array of length n_samples where each element is a string representing
@@ -490,7 +543,7 @@ class SpatialTypeAnnCntMtx:
 
     Assertions:
     -----------
-    - The number of rows in `count_matrix` must match the number of rows in `spatial_coords`
+    - The number of rows in `count_matrix` must match the number of rows in `spatial_distances`
       (i.e., the number of spatial locations).
     - The number of rows in `count_matrix` must also match the number of entries in `cell_types`
       (i.e., the number of annotated cell types).
@@ -507,27 +560,27 @@ class SpatialTypeAnnCntMtx:
     """
 
     count_matrix: _csr_matrix
-    spatial_coords: _np.ndarray
+    spatial_distances: _csr_matrix
     cell_types: _NDArray[_np.str_]
 
     def __post_init__(self):
         """Ensure the consistency of input data."""
         assert (
-            self.count_matrix.shape[0] == self.spatial_coords.shape[0]
+            self.count_matrix.shape[0] == self.spatial_distances.shape[0]
         ), "Number of rows in count_matrix must match the number of spatial coordinates."
         assert (
             self.count_matrix.shape[0] == self.cell_types.shape[0]
         ), "Number of rows in count_matrix must match the number of cell type annotations."
         if not isinstance(self.cell_types, _np.ndarray):
             self.cell_types = _np.array(self.cell_types).astype(str)
-        assert isinstance(self.spatial_coords, _np.ndarray)
+        assert isinstance(self.spatial_distances, _csr_matrix)
         return
 
 
+# DONE TODO: Use spatial_distances cache
 def celltype_refined_bin(
     ann_count_matrix: SpatialTypeAnnCntMtx,
     bin_radius: float = 3.0,  # bin-7
-    bin_norm_p: int = 2,  # 2 for Euclidean and 1 for Manhattan
     name_undefined: str = "Undefined",
     fraction_subsampling: float = 1.0,
     verbose: bool = True,
@@ -553,11 +606,6 @@ def celltype_refined_bin(
         The radius within which neighboring spots are considered for aggregation.
         Spots that are within this radius of each other will be grouped together for aggregation.
 
-    bin_norm_p : int, optional (default=2)
-        The p-norm to use for distance computation between spots.
-        - `p=2` corresponds to the Euclidean distance.
-        - `p=1` corresponds to the Manhattan distance.
-
     name_undefined : str, optional (default="Undefined")
         The name of the undefined cell-type. Any aggregated sample with undefined type will
         be removed from the final result.
@@ -578,7 +626,6 @@ def celltype_refined_bin(
     aggregated_mtx = celltype_refined_bin(
         ann_count_matrix,
         bin_radius=5.0,
-        bin_norm_p=2
     )
 
     # The result is a new SpatialTypeAnnCntMtx object with aggregated counts.
@@ -611,23 +658,25 @@ def celltype_refined_bin(
     celltype_pool: set[str] = set(
         _np.unique(ann_count_matrix.cell_types[bools_defined])
     )
-    # Build distance matrix
+    # Load distance matrix
     if verbose:
-        _tqdm.write("Building spatial distance matrix..")
-    ckdtree_defined = _cKDTree(
-        data=ann_count_matrix.spatial_coords[bools_defined, :],
+        _tqdm.write("Loading spatial distances..")
+    # Get subsampled items
+    dist_mat: _csr_matrix = ann_count_matrix.spatial_distances[bools_defined, :].copy()
+    dist_mat.eliminate_zeros()
+    whr_nonzero = dist_mat.data <= bin_radius
+    dist_mat: _csr_matrix = _csr_matrix(
+        _coo_matrix(
+            (
+                dist_mat.data[whr_nonzero],
+                (
+                    dist_mat.nonzero()[0][whr_nonzero],
+                    dist_mat.nonzero()[1][whr_nonzero],
+                ),
+            ),
+            shape=dist_mat.shape,
+        )
     )
-    ckdtree_all = _cKDTree(
-        data=ann_count_matrix.spatial_coords,
-    )
-    dist_mat: _coo_matrix = ckdtree_defined.sparse_distance_matrix(
-        other=ckdtree_defined,
-        max_distance=bin_radius,
-        p=bin_norm_p,
-        output_type="coo_matrix",
-    )
-    del ckdtree_all
-    del ckdtree_defined
     dist_dict: dict[str, _NDArray[_np.int_]] = {
         "rows": dist_mat.row,
         "cols": dist_mat.col,
@@ -694,7 +743,9 @@ def celltype_refined_bin(
     # Get result
     return SpatialTypeAnnCntMtx(
         count_matrix=weight_matrix @ ann_count_matrix.count_matrix,
-        spatial_coords=ann_count_matrix.spatial_coords[bools_defined, :],
+        spatial_distances=ann_count_matrix.spatial_distances[bools_defined, :][
+            :, bools_defined
+        ].copy(),
         cell_types=ann_count_matrix.cell_types[bools_defined],
     )
 
@@ -711,9 +762,9 @@ class SpTypeSizeAnnCntMtx:
         A sparse matrix of shape (n_samples, n_genes) where each entry represents
         the count of a specific gene in a specific sample (or spatial location).
 
-    spatial_coords : numpy.ndarray
-        A 2D array of shape (n_samples, 2), where each row contains the spatial
-        coordinates (e.g., x, y) corresponding to the sample or cell.
+    spatial_distances : csr_matrix
+        A 2D sparse array of shape (n_samples, n_samples), indicating distances between
+        each sample, with all distances above a threshold being set to zero.
 
     cell_types : numpy.ndarray
         A 1D array of length n_samples where each element is a string representing
@@ -743,7 +794,7 @@ class SpTypeSizeAnnCntMtx:
     """
 
     count_matrix: _csr_matrix
-    spatial_coords: _Nx2ArrayType  # of _NumberType
+    spatial_distances: _csr_matrix  # of _NumberType
     cell_types: _1DArrayType  # of str
     cell_sizes: _1DArrayType  # of int
     cell_mask: _1DArrayType | _UndefinedType = _UNDEFINED  # of int
@@ -751,7 +802,7 @@ class SpTypeSizeAnnCntMtx:
     def __post_init__(self):
         """Ensure the consistency of input data."""
         assert (
-            self.count_matrix.shape[0] == self.spatial_coords.shape[0]
+            self.count_matrix.shape[0] == self.spatial_distances.shape[0]
         ), "Number of rows in count_matrix must match the number of spatial coordinates."
         assert (
             self.count_matrix.shape[0] == self.cell_types.shape[0]
@@ -763,17 +814,17 @@ class SpTypeSizeAnnCntMtx:
         ), "Number of rows in count_matrix must match the number of cell size annotations"
         if not isinstance(self.cell_sizes, _np.ndarray):
             self.cell_sizes = _np.array(self.cell_sizes).astype(self.cell_sizes.dtype)
-        assert isinstance(self.spatial_coords, _np.ndarray)
+        assert isinstance(self.spatial_distances, _csr_matrix)
         if not isinstance(self.cell_mask, _UndefinedType):
             assert self.cell_mask.shape[0] == self.count_matrix.shape[0]
         return
 
 
-# A newer version of celltype_refined_bin with cell_size estimated
+# TODO: Parallel by chunking spatial_distances (50 hrs -> 50/n hrs)
+# DONE TODO: Use spatial_distances cache.
 def ctrbin_cellseg(
     ann_count_matrix: SpTypeSizeAnnCntMtx,
     coeff_overlap_constraint: float = 1.0,
-    bin_norm_p: int = 2,  # 2 for Euclidean and 1 for Manhattan
     verbose: bool = True,
 ) -> _1DArrayType:
     """
@@ -801,18 +852,6 @@ def ctrbin_cellseg(
         range so it increases (>1, resulting in less cells) or decreases (<1, resulting in more
         cells) a little bit.
 
-    bin_norm_p : int, optional (default=2)
-        The p-norm to use for distance computation between spots.
-        - `p=2` corresponds to the Euclidean distance.
-        - `p=1` corresponds to the Manhattan distance.
-
-    name_undefined : str, optional (default="Undefined")
-        The name of the undefined cell-type. Any aggregated sample with undefined type will
-        be removed from the final result.
-
-    fraction_subsampling : float, optional (default=1.0)
-        The fraction of samples to randomly subsample, 0.0 to 1.0, to reduce memory taken.
-
     Returns:
     --------
     The result is a 1d-array of cell id masks, with -1 indicating not-assigned.
@@ -827,12 +866,22 @@ def ctrbin_cellseg(
         ann_count_matrix.count_matrix.sum(axis=1), squeeze=True
     )
     ix_sorted_by_counts: _1DArrayType = _np.argsort(ns_counts)[::-1]
-    ckdtree_spots: _cKDTree = _cKDTree(ann_count_matrix.spatial_coords)
+    if verbose:
+        _tqdm.write(f"Loading spatial distances..")
+    dist_matrix: dict = {
+        "rows": [],
+        "cols": [],
+        "data": [],
+    }
+    ann_count_matrix.spatial_distances.eliminate_zeros()
+    whr_nonzero = ann_count_matrix.spatial_distances.data <= _np.max(ranges_overlap)
+    dist_matrix["data"] = ann_count_matrix.spatial_distances.data[whr_nonzero]
+    dist_matrix["rows"] = ann_count_matrix.spatial_distances.nonzero()[0][whr_nonzero]
+    dist_matrix["cols"] = ann_count_matrix.spatial_distances.nonzero()[1][whr_nonzero]
     dist_matrix: _csr_matrix = _csr_matrix(
-        ckdtree_spots.sparse_distance_matrix(
-            other=ckdtree_spots,
-            max_distance=_np.max(ranges_overlap),
-            p=bin_norm_p,
+        _coo_matrix(
+            (dist_matrix["data"], (dist_matrix["rows"], dist_matrix["cols"])),
+            shape=ann_count_matrix.spatial_distances.shape,
         )
     )
     cell_candidates_bool: _1DArrayType = _np.ones(
@@ -875,7 +924,7 @@ def ctrbin_cellseg(
         # Find neighbors of estimated size
         ix_aggregate = ix_nbors[
             _np.argsort(dists_nbors)[
-                : max(0, ann_count_matrix.cell_sizes[i_centroid] - 1)
+                : max(1, ann_count_matrix.cell_sizes[i_centroid] - 1)
             ]
         ]
         cell_masks[ix_aggregate] = i_centroid
@@ -883,6 +932,122 @@ def ctrbin_cellseg(
         # Remove too-close from centroid candidates
         cell_candidates_bool[ix_nbors[dists_nbors < ranges_overlap[i_centroid]]] = False
     return cell_masks
+
+
+def ctrbin_cellseg_parallel(
+    ann_count_matrix: SpTypeSizeAnnCntMtx,
+    spatial_coordinates: _Nx2ArrayType,
+    coeff_overlap_constraint: float = 1.0,
+    n_workers: int = 40,
+    verbose: bool = True,
+) -> _1DArrayType:
+    """
+    Experimental. See `ctrbin_cellseg` for params.
+
+    Needs to provide `spatial_coordinates` corresponding to samples in
+    `ann_count_matrix` to produce chunks.
+
+    Chunkwise parallel operation might bring a little inaccuracy to cell segmentation.
+    """
+    if verbose:
+        _tqdm.write(f"Estimating chunk config..")
+    xrange: tuple[_NumberType, _NumberType] = (
+        spatial_coordinates[:, 0].min(),
+        spatial_coordinates[:, 0].max(),
+    )
+    yrange: tuple[_NumberType, _NumberType] = (
+        spatial_coordinates[:, 1].min(),
+        spatial_coordinates[:, 1].max(),
+    )
+    assert xrange[1] - xrange[0] > 0
+    assert yrange[1] - yrange[0] > 0
+    yxratio: float = (yrange[1] - yrange[0]) / (xrange[1] - xrange[0])
+    n_chunks_along_x: int = max(1, int(_np.sqrt(n_workers / yxratio)))
+    n_chunks_along_y: int = max(1, int(n_chunks_along_x * yxratio))
+    cut_points_x: _1DArrayType = _np.linspace(
+        start=xrange[0],
+        stop=xrange[1],
+        num=n_chunks_along_x + 1,
+    )
+    cut_points_y: _1DArrayType = _np.linspace(
+        start=yrange[0],
+        stop=yrange[1],
+        num=n_chunks_along_y + 1,
+    )
+    if verbose:
+        _tqdm.write(
+            f"Chunk size: {cut_points_x[1]-cut_points_x[0]:.1f} x {cut_points_y[1]-cut_points_y[0]:.1f} (The ones at the edges might be a little bit bigger)"
+        )
+        _tqdm.write(f"Total {n_chunks_along_x} x {n_chunks_along_y} chunks.")
+    cut_points_x[0] = -_np.inf
+    cut_points_x[-1] = _np.inf
+    cut_points_y[0] = -_np.inf
+    cut_points_y[-1] = _np.inf
+    # Build fovs (field of view)
+    if verbose:
+        _tqdm.write("Building chunks..")
+    fov_table: dict = {
+        "upperleft": [],  # tuple
+        "lowerright": [],  # tuple
+        "indices": [],  # array
+    }
+    fov_table["upperleft"] = list(_product(cut_points_x[:-1], cut_points_y[:-1]))
+    fov_table["lowerright"] = list(_product(cut_points_x[1:], cut_points_y[1:]))
+    fov_table["indices"] = [
+        _np.arange(spatial_coordinates.shape[0])[
+            (spatial_coordinates[:, 0] >= fov_table["upperleft"][i_fov][0])
+            * (spatial_coordinates[:, 0] < fov_table["lowerright"][i_fov][0])
+            * (spatial_coordinates[:, 1] >= fov_table["upperleft"][i_fov][1])
+            * (spatial_coordinates[:, 1] < fov_table["lowerright"][i_fov][1])
+        ]
+        for i_fov in range(len(fov_table["upperleft"]))
+    ]
+    assert len(fov_table["indices"]) == len(fov_table["lowerright"])
+    if verbose:
+        _tqdm.write("Chunks ready. Allocating jobs..")
+    # Chunk items: (ann_count_matrix[chunked], coeff, verbose)
+    chunks: list[tuple] = [
+        (
+            SpTypeSizeAnnCntMtx(
+                count_matrix=ann_count_matrix.count_matrix[
+                    fov_table["indices"][i_fov], :
+                ].copy(),
+                spatial_distances=ann_count_matrix.spatial_distances[
+                    fov_table["indices"][i_fov], :
+                ][:, fov_table["indices"][i_fov]].copy(),
+                cell_types=ann_count_matrix.cell_types[fov_table["indices"][i_fov]],
+                cell_sizes=ann_count_matrix.cell_sizes[fov_table["indices"][i_fov]],
+            ),
+            coeff_overlap_constraint,
+            verbose,
+        )
+        for i_fov in range(len(fov_table["indices"]))
+    ]
+    if verbose:
+        _tqdm.write("Running jobs..")
+    with _Pool(len(fov_table["indices"])) as _p:
+        results: list[_1DArrayType] = _p.starmap(func=ctrbin_cellseg, iterable=chunks)
+    if verbose:
+        _tqdm.write("Gathering and sorting results..")
+    cellmasks_global: list[_NumberType] = []
+    indices_global: list[_NumberType] = []
+    for i_fov in range(len(results)):
+        cellmasks_sub: _1DArrayType = results[i_fov]
+        cellmasks_remap: _1DArrayType = cellmasks_sub.copy()
+        original_indices: _1DArrayType = fov_table["indices"][i_fov]
+        indices_global += list(original_indices)
+        for ix_sub, ix_original in enumerate(original_indices):
+            whr_thisix = cellmasks_sub == ix_sub
+            if whr_thisix.sum() == 0:
+                continue
+            cellmasks_remap[whr_thisix] = ix_original
+        cellmasks_global += list(cellmasks_remap)
+    cellmasks_final: _1DArrayType = _np.array(
+        sorted(list(zip(indices_global, cellmasks_global)))
+    )[:, 1]
+    if verbose:
+        _tqdm.write("Done.")
+    return cellmasks_final
 
 
 # Utilities

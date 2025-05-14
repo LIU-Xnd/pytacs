@@ -29,6 +29,7 @@ from .spatial import (
     SpatialTypeAnnCntMtx,
     celltype_refined_bin,
     ctrbin_cellseg,
+    ctrbin_cellseg_parallel,
     SpTypeSizeAnnCntMtx,
 )
 from .plot import (

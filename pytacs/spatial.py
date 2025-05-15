@@ -1181,6 +1181,7 @@ def cluster_spatial_domain(
 def aggregate_spots_to_cells(
     st_anndata: _AnnData,
     obs_name_cell_id: str = "cell_id_pytacs",
+    obs_name_cell_type: str | None = "cell_type_pytacs",
     verbose: bool = True,
 ) -> _AnnData:
     """
@@ -1220,7 +1221,8 @@ def aggregate_spots_to_cells(
         shape=(X_sc.shape[0], 2),
         dtype=float,
     )
-    df_obs: _pd.DataFrame = st_anndata.obs.loc[cell_id_pool.astype(str), :].copy()
+    # df_obs: _pd.DataFrame = st_anndata.obs.loc[cell_id_pool.astype(str), :].copy()  # buggy
+    celltype_obs: list[str] = []
     for i_cellid in itor_:
         cellid: int = cell_id_pool[i_cellid]
         whr_thiscell: _1DArrayType = st_anndata.obs[obs_name_cell_id].values == cellid
@@ -1229,17 +1231,24 @@ def aggregate_spots_to_cells(
             sp_coords[i_cellid, :] = st_anndata.obsm["spatial"][whr_thiscell, :].mean(
                 axis=0
             )
-    return _AnnData(
+        if obs_name_cell_type is not None:
+            celltype_obs.append(st_anndata.obs.loc[whr_thiscell, obs_name_cell_type].values[0])
+    res = _AnnData(
         X=X_sc.tocsr(),
-        obs=df_obs,
+        # obs=df_obs,  # buggy
         var=st_anndata.var.copy(),
         obsm={"spatial": sp_coords} if "spatial" in st_anndata.obsm else None,
     )
+    res.obs[obs_name_cell_id] = cell_id_pool
+    if obs_name_cell_type is not None:
+        res.obs[obs_name_cell_type] = celltype_obs
+    return res
 
 
 def aggregate_spots_to_cells_parallel(
     st_anndata: _AnnData,
     obs_name_cell_id: str = "cell_id_pytacs",
+    obs_name_cell_type: str | None = 'cell_type_pytacs',
     n_workers: int = 10,
     verbose: bool = True,
 ) -> _AnnData:
@@ -1279,6 +1288,7 @@ def aggregate_spots_to_cells_parallel(
                         :,
                     ].copy(),
                     obs_name_cell_id,
+                    obs_name_cell_type,
                     verbose,
                 )
             )
@@ -1293,6 +1303,7 @@ def aggregate_spots_to_cells_parallel(
                         :,
                     ].copy(),
                     obs_name_cell_id,
+                    obs_name_cell_type,
                     verbose,
                 )
             )
@@ -1308,6 +1319,7 @@ def aggregate_spots_to_cells_parallel(
                     :,
                 ].copy(),
                 obs_name_cell_id,
+                obs_name_cell_type,
                 verbose,
             )
         )

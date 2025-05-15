@@ -14,6 +14,7 @@ from .types import (
     _NumberType,
     _Nx2ArrayType,
 )
+import scanpy as _sc
 import numpy as _np
 from scipy.spatial import cKDTree as _cKDTree  # to construct sparse distance matrix
 
@@ -1175,3 +1176,132 @@ def cluster_spatial_domain(
         )
     else:
         return cluster_labels
+
+
+def aggregate_spots_to_cells(
+    st_anndata: _AnnData,
+    obs_name_cell_id: str = "cell_id_pytacs",
+    verbose: bool = True,
+) -> _AnnData:
+    """
+    Aggregate spatial transcriptomics spots into single-cell resolution using a cell ID annotation.
+
+    Parameters
+    ----------
+    st_anndata : AnnData
+        The input AnnData object where each observation (row) corresponds to a spatial spot.
+    obs_name_cell_id : str
+        The name of the column in `st_anndata.obs` that contains cell ID annotations.
+        Spots with the same cell ID will be aggregated together.
+
+    Returns
+    -------
+    AnnData
+        A new AnnData object where each observation corresponds to a single cell, obtained by
+        aggregating the gene expression and spatial coordinates (if available) of all
+        spots belonging to the same cell ID.
+    """
+    cell_id_pool: _1DArrayType = _np.unique(st_anndata.obs[obs_name_cell_id].values)
+    whr_def: _1DArrayType = cell_id_pool != -1
+    cell_id_pool = cell_id_pool[whr_def]
+    del whr_def
+    if verbose:
+        itor_ = _tqdm(
+            range(len(cell_id_pool)),
+            desc="Aggregating spots",
+            ncols=60,
+        )
+    else:
+        itor_ = range(len(cell_id_pool))
+    X_sc: _lil_matrix = _lil_matrix((len(cell_id_pool), st_anndata.X.shape[1])).astype(
+        int
+    )
+    sp_coords: _Nx2ArrayType = _np.empty(
+        shape=(X_sc.shape[0], 2),
+        dtype=float,
+    )
+    df_obs: _pd.DataFrame = st_anndata.obs.iloc[cell_id_pool, :].copy()
+    for i_cellid in itor_:
+        cellid: int = cell_id_pool[i_cellid]
+        whr_thiscell: _1DArrayType = st_anndata.obs[obs_name_cell_id].values == cellid
+        X_sc[i_cellid, :] = st_anndata.X[whr_thiscell, :].sum(axis=0)
+        if "spatial" in st_anndata.obsm:
+            sp_coords[i_cellid, :] = st_anndata.obsm["spatial"][whr_thiscell, :].mean(
+                axis=0
+            )
+    return _AnnData(
+        X=X_sc.tocsr(),
+        obs=df_obs,
+        var=st_anndata.var.copy(),
+        obsm={"spatial": sp_coords} if "spatial" in st_anndata.obsm else None,
+    )
+
+
+def aggregate_spots_to_cells_parallel(
+    st_anndata: _AnnData,
+    obs_name_cell_id: str = "cell_id_pytacs",
+    n_workers: int = 10,
+    verbose: bool = True,
+) -> _AnnData:
+    """
+    Aggregate spatial transcriptomics spots into single-cell resolution using a cell ID annotation.
+
+    Parameters
+    ----------
+    st_anndata : AnnData
+        The input AnnData object where each observation (row) corresponds to a spatial spot.
+    obs_name_cell_id : str
+        The name of the column in `st_anndata.obs` that contains cell ID annotations.
+        Spots with the same cell ID will be aggregated together.
+
+    Returns
+    -------
+    AnnData
+        A new AnnData object where each observation corresponds to a single cell, obtained by
+        aggregating the gene expression and spatial coordinates (if available) of all
+        spots belonging to the same cell ID.
+    """
+    ix_argsort: _1DArrayType = _np.argsort(st_anndata.obs[obs_name_cell_id].values)
+    cellix_sort: _1DArrayType = st_anndata.obs[obs_name_cell_id].values[ix_argsort]
+    change_points: _1DArrayType = _np.where(cellix_sort[:-1] != cellix_sort[1:])[0]
+    ix_change: _1DArrayType = _np.append(change_points, len(cellix_sort) - 1)
+    n_changepoints_per_chunk: int = len(ix_change) // n_workers
+    chunks: list[_AnnData] = []
+    if verbose:
+        _tqdm.write(f"Allocating {n_workers} jobs..")
+    for i_job in range(n_workers):
+        if i_job == n_workers - 1:
+            chunks.append(
+                (
+                    st_anndata[
+                        ix_argsort[ix_change[i_job * n_changepoints_per_chunk] :], :
+                    ].copy(),
+                    obs_name_cell_id,
+                    verbose,
+                )
+            )
+            continue
+        chunks.append(
+            (
+                st_anndata[
+                    ix_argsort[
+                        ix_change[i_job * n_changepoints_per_chunk] : ix_change[
+                            (i_job + 1) * n_changepoints_per_chunk
+                        ]
+                    ],
+                    :,
+                ].copy(),
+                obs_name_cell_id,
+                verbose,
+            )
+        )
+    with _Pool(n_workers) as p_:
+        results: list[_AnnData] = p_.starmap(
+            func=aggregate_spots_to_cells, iterable=chunks
+        )
+    if verbose:
+        _tqdm.write(f"Gathering results..")
+    res = _sc.concat(adatas=results, axis="obs", join="inner")
+    if verbose:
+        _tqdm.write("Done.")
+    return res

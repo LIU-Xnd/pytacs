@@ -31,6 +31,8 @@ from .spatial import (
     ctrbin_cellseg,
     ctrbin_cellseg_parallel,
     SpTypeSizeAnnCntMtx,
+    aggregate_spots_to_cells,
+    aggregate_spots_to_cells_parallel,
 )
 from .plot import (
     SpAnnPoints,

@@ -1263,18 +1263,34 @@ def aggregate_spots_to_cells_parallel(
     """
     ix_argsort: _1DArrayType = _np.argsort(st_anndata.obs[obs_name_cell_id].values)
     cellix_sort: _1DArrayType = st_anndata.obs[obs_name_cell_id].values[ix_argsort]
-    change_points: _1DArrayType = _np.where(cellix_sort[:-1] != cellix_sort[1:])[0]
-    ix_change: _1DArrayType = _np.append(change_points, len(cellix_sort) - 1)
-    n_changepoints_per_chunk: int = len(ix_change) // n_workers
+    change_points_sort: _1DArrayType = _np.where(cellix_sort[:-1] != cellix_sort[1:])[0]
+    n_changepoints_per_chunk: int = len(change_points_sort) // n_workers
     chunks: list[_AnnData] = []
     if verbose:
         _tqdm.write(f"Allocating {n_workers} jobs..")
     for i_job in range(n_workers):
+        if i_job == 0:
+            chunks.append(
+                (
+                    st_anndata[
+                        ix_argsort[
+                            : change_points_sort[(i_job + 1) * n_changepoints_per_chunk]
+                        ],
+                        :,
+                    ].copy(),
+                    obs_name_cell_id,
+                    verbose,
+                )
+            )
+            continue
         if i_job == n_workers - 1:
             chunks.append(
                 (
                     st_anndata[
-                        ix_argsort[ix_change[i_job * n_changepoints_per_chunk] :], :
+                        ix_argsort[
+                            change_points_sort[i_job * n_changepoints_per_chunk] :
+                        ],
+                        :,
                     ].copy(),
                     obs_name_cell_id,
                     verbose,
@@ -1285,9 +1301,9 @@ def aggregate_spots_to_cells_parallel(
             (
                 st_anndata[
                     ix_argsort[
-                        ix_change[i_job * n_changepoints_per_chunk] : ix_change[
-                            (i_job + 1) * n_changepoints_per_chunk
-                        ]
+                        change_points_sort[
+                            i_job * n_changepoints_per_chunk
+                        ] : change_points_sort[(i_job + 1) * n_changepoints_per_chunk]
                     ],
                     :,
                 ].copy(),

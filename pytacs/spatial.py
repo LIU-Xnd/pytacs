@@ -1274,7 +1274,7 @@ def aggregate_spots_to_cells_parallel(
                 (
                     st_anndata[
                         ix_argsort[
-                            : change_points_sort[(i_job + 1) * n_changepoints_per_chunk]
+                            : change_points_sort[(i_job + 1) * n_changepoints_per_chunk]+1
                         ],
                         :,
                     ].copy(),
@@ -1288,7 +1288,7 @@ def aggregate_spots_to_cells_parallel(
                 (
                     st_anndata[
                         ix_argsort[
-                            change_points_sort[i_job * n_changepoints_per_chunk] :
+                            change_points_sort[i_job * n_changepoints_per_chunk]+1:
                         ],
                         :,
                     ].copy(),
@@ -1303,7 +1303,7 @@ def aggregate_spots_to_cells_parallel(
                     ix_argsort[
                         change_points_sort[
                             i_job * n_changepoints_per_chunk
-                        ] : change_points_sort[(i_job + 1) * n_changepoints_per_chunk]
+                        ]+1 : change_points_sort[(i_job + 1) * n_changepoints_per_chunk]+1
                     ],
                     :,
                 ].copy(),

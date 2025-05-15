@@ -1220,7 +1220,7 @@ def aggregate_spots_to_cells(
         shape=(X_sc.shape[0], 2),
         dtype=float,
     )
-    df_obs: _pd.DataFrame = st_anndata.obs.iloc[cell_id_pool, :].copy()
+    df_obs: _pd.DataFrame = st_anndata.obs.loc[cell_id_pool.astype(str), :].copy()
     for i_cellid in itor_:
         cellid: int = cell_id_pool[i_cellid]
         whr_thiscell: _1DArrayType = st_anndata.obs[obs_name_cell_id].values == cellid

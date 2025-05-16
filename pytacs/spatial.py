@@ -57,7 +57,7 @@ def spatial_distances(
     )
     distances_propagation.eliminate_zeros()
     sp_adata.obsp["spatial_distances"] = _csr_matrix(distances_propagation)
-    sp_adata.uns["max_spatial_distance"] = max_propagation_radius
+    sp_adata.uns["max_spatial_distance"] = max_spatial_distance
     if verbose:
         _tqdm.write(
             'Saved in .obsp["spatial_distances"]. Related param saved in .uns["max_spatial_distance"]'

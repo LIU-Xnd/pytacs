@@ -244,7 +244,8 @@ def rw_aggregate(
     spatial_cols = distances_propagation.nonzero()[1]
     spatial_data = distances_propagation.data
     whr_within_nbhd = spatial_data <= nbhd_radius
-
+    if verbose:
+        _tqdm.write('Building neighborhoods..')
     distances_spatial = _coo_matrix(
         (
             spatial_data[whr_within_nbhd],
@@ -254,6 +255,8 @@ def rw_aggregate(
     )
     del spatial_data, spatial_cols, spatial_rows
     # Boundaries for propagation
+    if verbose:
+        _tqdm.write('Building random-walk boundaries..')
     ilocs_propagation = _np.array(
         list(zip(distances_propagation.row, distances_propagation.col))
     )
@@ -282,9 +285,13 @@ def rw_aggregate(
         (distances_spatial.shape[0], distances_spatial.shape[1]),
     )
     # Get defined embedding
+    if verbose:
+        _tqdm.write('Getting defined embeddings..')
     embeds: _np.ndarray = X_normalized @ embed_loadings.T
     del X_normalized
     del embed_loadings
+    if verbose:
+        _tqdm.write('Computing topology graph..')
     ilocs_nonzero = _np.array(list(zip(distances_spatial.row, distances_spatial.col)))
     if mode_metric == "inv_dist":
         distances[ilocs_nonzero[:, 0], ilocs_nonzero[:, 1]] = _np.linalg.norm(
@@ -338,6 +345,8 @@ def rw_aggregate(
     }  # final weight_matrix of all spots, gonna update
 
     # Random Walk
+    if verbose:
+        _tqdm.write('Random walking..')
     counter_celltypes_global = dict()  # counter of celltypes total
     for i_iter in range(max_iter):
         # Aggregate spots according to similarities

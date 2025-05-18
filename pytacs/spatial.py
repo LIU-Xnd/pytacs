@@ -224,20 +224,20 @@ def rw_aggregate(
     # Try to load from .obsp
     if verbose:
         _tqdm.write(f'Trying to load from cache .obsp["spatial_distances"]..')
-        if "spatial_distances" in st_anndata.obsp:
-            distances_propagation = _coo_matrix(st_anndata.obsp["spatial_distances"])
-        else:
-            if verbose:
-                _tqdm.write(f"Cache not found. Computing..")
-            spatial_distances(
-                sp_adata=st_anndata,
-                max_spatial_distance=max_propagation_radius,
-                p_norm=2,
-                verbose=verbose,
-            )
-            distances_propagation: _coo_matrix = _coo_matrix(
-                st_anndata.obsp["spatial_distances"]
-            )
+    if "spatial_distances" in st_anndata.obsp:
+        distances_propagation = _coo_matrix(st_anndata.obsp["spatial_distances"])
+    else:
+        if verbose:
+            _tqdm.write(f"Cache not found. Computing..")
+        spatial_distances(
+            sp_adata=st_anndata,
+            max_spatial_distance=max_propagation_radius,
+            p_norm=2,
+            verbose=verbose,
+        )
+        distances_propagation: _coo_matrix = _coo_matrix(
+            st_anndata.obsp["spatial_distances"]
+        )
     # Construct spatial dist matrix
     distances_propagation.eliminate_zeros()
     spatial_rows = distances_propagation.nonzero()[0]

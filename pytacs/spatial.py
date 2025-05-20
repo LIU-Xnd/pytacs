@@ -30,7 +30,7 @@ from dataclasses import dataclass as _dataclass
 import pandas as _pd
 from sklearn.decomposition import TruncatedSVD as _TruncatedSVD
 from .utils import normalize_csr as _normalize_csr
-from .utils import trim_csr_per_row as _trim_csr_per_row
+from .utils import prune_csr_per_row_cum_prob as _prune_csr_per_row_cum_prob
 from .utils import rowwise_cosine_similarity as _rowwise_cosine_similarity
 from itertools import product as _product
 from multiprocessing.pool import Pool as _Pool
@@ -99,7 +99,7 @@ def rw_aggregate(
     n_pcs: int = 30,
     mode_metric: _Literal["inv_dist", "cosine"] = "cosine",
     mode_aggregation: _Literal["weighted", "unweighted"] = "unweighted",
-    trim_proportion: float = 0.5,
+    cum_prob_keep: float = 0.5,
     mode_walk: _Literal["rw"] = "rw",
     return_weight_matrix: bool = False,
     return_cell_sizes: bool = True,
@@ -154,9 +154,9 @@ def rw_aggregate(
             Aggregation strategy to combine neighborhood gene expression.
             'unweighted' uses uniform averaging; 'weighted' uses transition probabilities.
 
-        trim_proportion (float, optional):
-            Proportion of nodes to trim off after each iter of random walk, in order to prevent accumulation of
-            erroneous spots.
+        cum_prob_keep (float, optional):
+            The top nodes with this cumulative probability are retained after each iter of random walk, in order to prevent accumulation of
+            erroneous spots. Set to 1.0 to skip this.
 
         mode_walk (Literal['rw', 'rwr'], optional):
             Type of random walk to perform:
@@ -182,7 +182,7 @@ def rw_aggregate(
     assert mode_embedding in ["raw", "pc"]
     assert mode_metric in ["inv_dist", "cosine"]
     assert mode_aggregation in ["weighted", "unweighted"]
-    assert trim_proportion >= 0.0 and trim_proportion < 1.0
+    assert cum_prob_keep >= 0.0 and cum_prob_keep <= 1.0
     assert mode_walk in ["rw"]
 
     if normalize_:
@@ -450,12 +450,10 @@ def rw_aggregate(
             similarities: _csr_matrix = similarities.tocsr()
             # Re-normalize
             similarities: _csr_matrix = _normalize_csr(similarities)
-        # Trim
-        if trim_proportion == 0.0:
-            continue
-        similarities = _trim_csr_per_row(
+        # prune
+        similarities = _prune_csr_per_row_cum_prob(
             csr_mat=similarities,
-            trim_proportion=trim_proportion,
+            cum_prob_keep=cum_prob_keep,
             tqdm_verbose=verbose,
         )
 

@@ -187,12 +187,16 @@ def normalize_csr(mat_csr: _csr_matrix) -> _csr_matrix:
     return diag_row_inv @ mat_csr  # Normalized
 
 
-def trim_csr_per_row(
+def prune_csr_per_row(
     csr_mat: _csr_matrix,
-    trim_proportion: float = 0.5,
+    prune_proportion: float = 0.5,
     tqdm_verbose: bool = True,
 ) -> _csr_matrix:
-    """Trim off the least `trim_proportion` terms per row."""
+    """
+    Deprecated.
+
+    Prune the least `prune_proportion` terms per row.
+    """
     new_data = []
     new_indices = []
     new_indptr = [0]
@@ -200,7 +204,7 @@ def trim_csr_per_row(
     if tqdm_verbose:
         itor_ = _tqdm(
             range(csr_mat.shape[0]),
-            desc=f"Trimming off {trim_proportion:.1%} nodes",
+            desc=f"Pruning off {prune_proportion:.1%} nodes",
             ncols=60,
         )
     else:
@@ -217,7 +221,7 @@ def trim_csr_per_row(
 
         # Sort by value
         sorted_idx = _np.argsort(row_data)[::-1]
-        keep_count = max(1, int(_np.ceil(len(row_data) * (1 - trim_proportion))))
+        keep_count = max(1, int(_np.ceil(len(row_data) * (1 - prune_proportion))))
         keep_idx = sorted_idx[:keep_count]
 
         # Keep only top proportion
@@ -225,11 +229,63 @@ def trim_csr_per_row(
         new_indices.extend(row_indices[keep_idx])
         new_indptr.append(len(new_data))
 
-    trimmed_csr = _csr_matrix(
+    pruned_csr = _csr_matrix(
         (new_data, new_indices, new_indptr),
         shape=csr_mat.shape,
     )
-    return trimmed_csr
+    return pruned_csr
+
+
+def prune_csr_per_row_cum_prob(
+    csr_mat: _csr_matrix,
+    cum_prob_keep: float = 0.5,
+    tqdm_verbose: bool = True,
+) -> _csr_matrix:
+    """
+    Keeps the top terms with cumulative probability of `cum_prob_keep` per row,
+    and prune the rest. At least one term is retained.
+    """
+    if cum_prob_keep >= 1.0:
+        return csr_mat.copy()
+    new_data = []
+    new_indices = []
+    new_indptr = [0]
+
+    if tqdm_verbose:
+        itor_ = _tqdm(
+            range(csr_mat.shape[0]),
+            desc=f"Pruning off nodes",
+            ncols=60,
+        )
+    else:
+        itor_ = range(csr_mat.shape[0])
+    for i in itor_:
+        row_start = csr_mat.indptr[i]
+        row_end = csr_mat.indptr[i + 1]
+        row_data = csr_mat.data[row_start:row_end]
+        row_indices = csr_mat.indices[row_start:row_end]
+
+        if len(row_data) == 0:
+            new_indptr.append(len(new_data))
+            continue
+
+        # Sort by value
+        sorted_idx = _np.argsort(row_data)[::-1]
+        cumprob = _np.cumsum(row_data[sorted_idx])
+        keep_count = _np.argwhere(cumprob >= cum_prob_keep)[0][0] + 1
+        keep_idx = sorted_idx[:keep_count]
+
+        # Keep only top proportion
+        new_data.extend(row_data[keep_idx])
+        new_indices.extend(row_indices[keep_idx])
+        new_indptr.append(len(new_data))
+
+    pruned_csr = _csr_matrix(
+        (new_data, new_indices, new_indptr),
+        shape=csr_mat.shape,
+    )
+    pruned_csr.eliminate_zeros()
+    return pruned_csr
 
 
 def rowwise_cosine_similarity(A: _np.ndarray, B: _np.ndarray) -> _NDArray[_np.float_]:

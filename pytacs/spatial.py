@@ -955,7 +955,9 @@ def ctrbin_cellseg_parallel(
     verbose: bool = True,
 ) -> _1DArrayType:
     """
-    Experimental. See `ctrbin_cellseg` for params.
+    Experimental. Use within `if __name__=='__main__':` statement!
+    
+    See `ctrbin_cellseg` for params.
 
     Needs to provide `spatial_coordinates` corresponding to samples in
     `ann_count_matrix` to produce chunks.

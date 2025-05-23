@@ -1,4 +1,4 @@
-# pytacs: Python Topology-Aware Cell-Type Spotting -
+# pytacs: Python Topology-Aware Convoluting Spots -
 #  an improved version of TopACT (https://gitlab.com/kfbenjamin/topact)
 #  implementation.
 
@@ -12,15 +12,15 @@
 
 
 __author__ = "Liu, Xindong"
-__version__ = "1.8.0"
+__version__ = "2025.5.23"  # alpha
 
 from .data import AnnDataPreparer, downsample_cells, compare_umap
 from .classifier import (
     SVM,
-    GaussianNaiveBayes,
-    QProximityClassifier,
-    CosineSimilarityClassifier,
-    JaccardClassifier,
+    # GaussianNaiveBayes,
+    # QProximityClassifier,
+    # CosineSimilarityClassifier,
+    # JaccardClassifier,
 )
 from .spatial import (
     rw_aggregate,

@@ -31,6 +31,7 @@ import pandas as _pd
 from sklearn.decomposition import TruncatedSVD as _TruncatedSVD
 from .utils import normalize_csr as _normalize_csr
 from .utils import prune_csr_per_row_cum_prob as _prune_csr_per_row_cum_prob
+from .utils import prune_csr_per_row_infl_point as _prune_csr_per_row_infl_point
 from .utils import rowwise_cosine_similarity as _rowwise_cosine_similarity
 from itertools import product as _product
 from multiprocessing.pool import Pool as _Pool
@@ -99,7 +100,8 @@ def rw_aggregate(
     n_pcs: int = 30,
     mode_metric: _Literal["inv_dist", "cosine"] = "cosine",
     mode_aggregation: _Literal["weighted", "unweighted"] = "unweighted",
-    cum_prob_keep: float = 0.5,
+    mode_prune: _Literal['inflection_point', 'proportional'] = 'inflection_point',
+    min_points_to_keep: int = 1,
     mode_walk: _Literal["rw"] = "rw",
     return_weight_matrix: bool = False,
     return_cell_sizes: bool = True,
@@ -154,10 +156,6 @@ def rw_aggregate(
             Aggregation strategy to combine neighborhood gene expression.
             'unweighted' uses uniform averaging; 'weighted' uses transition probabilities.
 
-        cum_prob_keep (float, optional):
-            The top nodes with this cumulative probability are retained after each iter of random walk, in order to prevent accumulation of
-            erroneous spots. Set to 1.0 to skip this.
-
         mode_walk (Literal['rw', 'rwr'], optional):
             Type of random walk to perform:
             'rw' for vanilla random walk,
@@ -182,7 +180,7 @@ def rw_aggregate(
     assert mode_embedding in ["raw", "pc"]
     assert mode_metric in ["inv_dist", "cosine"]
     assert mode_aggregation in ["weighted", "unweighted"]
-    assert cum_prob_keep >= 0.0 and cum_prob_keep <= 1.0
+    assert mode_prune in ['inflection_point', 'proportional']
     assert mode_walk in ["rw"]
 
     if normalize_:
@@ -451,11 +449,18 @@ def rw_aggregate(
             # Re-normalize
             similarities: _csr_matrix = _normalize_csr(similarities)
         # prune
-        similarities = _prune_csr_per_row_cum_prob(
-            csr_mat=similarities,
-            cum_prob_keep=cum_prob_keep,
-            tqdm_verbose=verbose,
-        )
+        if mode_prune == 'proportional':
+            similarities = _prune_csr_per_row_cum_prob(
+                csr_mat=similarities,
+                cum_prob_keep=0.5,
+                tqdm_verbose=verbose,
+            )
+        else:
+            similarities = _prune_csr_per_row_infl_point(
+                csr_mat=similarities,
+                min_points_to_keep=min_points_to_keep,
+                tqdm_verbose=verbose,
+            )
 
     weight_matrix: _coo_matrix = _coo_matrix(
         (weight_matrix["data"], (weight_matrix["rows"], weight_matrix["cols"])),

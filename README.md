@@ -1,4 +1,4 @@
-# Pytacs - Python-implemented Topology-Aware Cell-type Spotting
+# Pytacs - Python-implemented Topology-Aware Convoluting Spots
 
 ```
 Copyright (C) 2025 Xindong Liu
@@ -31,8 +31,25 @@ But Pytacs has improved it in several ways:
 more flexible in terms of ad-hoc cell-type mapping and novel cell-type detection.
 
 ## Requirements
-This package is expected to be released on PyPi soon. By then, it could be simply
+This package is released on PyPi now! It could be simply
 installed by `pip install pytacs` (the package name yet might change).
+
+For conda users,
+
+```Bash
+conda create -n pytacs python=3.12 -y
+conda activate pytacs
+pip install pytacs
+```
+
+For python3 users, first make sure your python is
+of version 3.12, and then in your working directory,
+
+```Bash
+python -m venv pytacs
+source pytacs/bin/activate
+python -m pip install pytacs
+```
 
 For developers, requirements (at develop time) are listed in
 `requirements.in` (initial dependencies), `requirements.txt` (full dependencies)
@@ -65,12 +82,11 @@ For detailed usage, see [Basic_Usage_of_pytacs.md](./Basic_Usage_of_pytacs.md)
     max_iter=20,
     steps_per_iter=3,
     nbhd_radius=2.4,
-    trim_proportion=0.5,
     max_propagation_radius=10.,
-    mode_metric='cosine',
+    mode_metric='inv_dist',
     mode_embedding='pc',
     mode_aggregation='unweighted',
-    n_pcs=100,
+    n_pcs=50,
 )
 >>> ct_full = extract_celltypes_full(agg_res)
 
@@ -83,12 +99,13 @@ For detailed usage, see [Basic_Usage_of_pytacs.md](./Basic_Usage_of_pytacs.md)
 )
 
 # Get refined binned pseudo-single-cell spatial transcriptomics 
->>> ann_mtx = tax.SpatialTypeAnnCntMtx(
+>>> ann_mtx = tax.SpTypeSizeAnnCntMtx(
     count_matrix,
     spatial_coords,
     cell_types,
+    cell_sizes,
 )
->>> ann_mtx_sc = tax.celltype_refined_bin(
+>>> ann_mtx_sc = tax.ctrbin_cellseg_parallel(
     ann_mtx,
 )
 ```

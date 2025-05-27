@@ -12,7 +12,7 @@
 
 
 __author__ = "Liu, Xindong"
-__version__ = "2025.5.23"  # alpha
+__version__ = "2025.5.27"  # alpha
 
 from .data import AnnDataPreparer, downsample_cells, compare_umap
 from .classifier import (
@@ -40,3 +40,5 @@ from .plot import (
     plot_boundaries,
     plot_boundaries_on_grids,
 )
+
+# TODO: Add recipe module for user-friendliness

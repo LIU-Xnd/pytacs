@@ -63,6 +63,8 @@ To use it for downstream analysis in combination with Squidpy, it is recommended
 
 ## Usage
 
+In the future, there will be a well-prepared `recipe` module for users to use conveniently.
+
 For detailed usage, see [Basic_Usage_of_pytacs.md](./Basic_Usage_of_pytacs.md)
 
 ```Python

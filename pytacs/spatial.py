@@ -98,8 +98,8 @@ def rw_aggregate(
     log1p_: bool = True,
     mode_embedding: _Literal["raw", "pc"] = "pc",
     n_pcs: int = 30,
-    mode_metric: _Literal["inv_dist", "cosine"] = "cosine",
-    mode_aggregation: _Literal["weighted", "unweighted"] = "unweighted",
+    mode_metric: _Literal["inv_dist", "cosine"] = "inv_dist",
+    mode_aggregation: _Literal["weighted", "unweighted"] = "weighted",
     mode_prune: _Literal['inflection_point', 'proportional'] = 'inflection_point',
     min_points_to_keep: int = 1,
     mode_walk: _Literal["rw"] = "rw",
@@ -155,6 +155,9 @@ def rw_aggregate(
         mode_aggregation (Literal['unweighted', 'weighted'], optional):
             Aggregation strategy to combine neighborhood gene expression.
             'unweighted' uses uniform averaging; 'weighted' uses transition probabilities.
+
+        mode_prune (Literal['inflection_point', 'proportional'], optional):
+            Type of pruning strategy. Defaults to inflection_point.
 
         mode_walk (Literal['rw', 'rwr'], optional):
             Type of random walk to perform:
@@ -838,6 +841,7 @@ class SpTypeSizeAnnCntMtx:
 def ctrbin_cellseg(
     ann_count_matrix: SpTypeSizeAnnCntMtx,
     coeff_overlap_constraint: float = 1.0,
+    coeff_cellsize: float = 1.0,
     verbose: bool = True,
 ) -> _1DArrayType:
     """
@@ -864,6 +868,12 @@ def ctrbin_cellseg(
         removing cell centroids that are too close. This coefficient is used to multiply the
         range so it increases (>1, resulting in less cells) or decreases (<1, resulting in more
         cells) a little bit.
+    
+    coeff_cellsize : float, optional (default=1.0)
+        A coefficient used to slightly adjust cell sizes. Cell sizes are multiplied by this coeff,
+        so that a larger (or smaller) set of cells is resulted. For example, if `coeff_overlap_constraint`
+        is kind of large, then the number of cells will be smaller, in which case it is recommended to set
+        this parameter to >1.0 to match this modification.
 
     Returns:
     --------
@@ -874,6 +884,7 @@ def ctrbin_cellseg(
     ranges_overlap: _1DArrayType = (
         coeff_overlap_constraint * 2 * _np.sqrt(ann_count_matrix.cell_sizes / _np.pi)
     )
+    # TODO: Can use prior nuc positions for initial centroids
     # Calculate n_counts for each spot
     ns_counts: _1DArrayType = _to_array(
         ann_count_matrix.count_matrix.sum(axis=1), squeeze=True
@@ -935,9 +946,12 @@ def ctrbin_cellseg(
             dist_matrix[i_centroid, ix_nbors], squeeze=True
         )
         # Find neighbors of estimated size
+        cellsize: int = ann_count_matrix.cell_sizes[i_centroid]
+        if coeff_cellsize != 1.0:
+            cellsize = int(_np.round(cellsize * coeff_cellsize))
         ix_aggregate = ix_nbors[
             _np.argsort(dists_nbors)[
-                : max(1, ann_count_matrix.cell_sizes[i_centroid] - 1)
+                : max(1, cellsize - 1)
             ]
         ]
         cell_masks[ix_aggregate] = i_centroid

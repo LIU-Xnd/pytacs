@@ -50,12 +50,11 @@ clf.fit(data_preper.sn_adata)
     max_iter=20,
     steps_per_iter=3,
     nbhd_radius=2.4,
-    trim_proportion=0.5,
     max_propagation_radius=10.,
-    mode_metric='cosine',
+    mode_metric='inv_dist',
     mode_embedding='pc',
     mode_aggregation='unweighted',
-    n_pcs=100,
+    n_pcs=50,
 )
 >>> ct_full = extract_celltypes_full(agg_res)
 
@@ -65,5 +64,15 @@ clf.fit(data_preper.sn_adata)
     x=data_prep.sp_adata.obsm['spatial'][:,0],
     y=data_prep.sp_adata.obsm['spatial'][:,1],
     hue=ct_full,
+)
+# Get refined binned pseudo-single-cell spatial transcriptomics 
+>>> ann_mtx = tax.SpTypeSizeAnnCntMtx(
+    count_matrix,
+    spatial_coords,
+    cell_types,
+    cell_sizes,
+)
+>>> ann_mtx_sc = tax.ctrbin_cellseg_parallel(
+    ann_mtx,
 )
 ```

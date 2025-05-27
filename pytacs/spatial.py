@@ -842,6 +842,7 @@ def ctrbin_cellseg(
     ann_count_matrix: SpTypeSizeAnnCntMtx,
     coeff_overlap_constraint: float = 1.0,
     coeff_cellsize: float = 1.0,
+    nuclei_priorities: _1DArrayType | None = None,
     verbose: bool = True,
 ) -> _1DArrayType:
     """
@@ -874,22 +875,30 @@ def ctrbin_cellseg(
         so that a larger (or smaller) set of cells is resulted. For example, if `coeff_overlap_constraint`
         is kind of large, then the number of cells will be smaller, in which case it is recommended to set
         this parameter to >1.0 to match this modification.
+    
+    nuclei_priorities : 1DArray | None, optional (default=None)
+        An array of spot ids in a certain order, e.g., the order of nuclei staining intensities. If provided,
+        uses the order to generate cell centroids sequentially. If None, uses n_counts order (L1-order).
 
     Returns:
     --------
     The result is a 1d-array of cell id masks, with -1 indicating not-assigned.
     """
     n_samples_raw: int = ann_count_matrix.count_matrix.shape[0]
+    if nuclei_priorities is not None:
+        assert len(nuclei_priorities) == n_samples_raw
     # Estimate overlap ranges by coeff * 2 * sqrt(S/pi)
     ranges_overlap: _1DArrayType = (
         coeff_overlap_constraint * 2 * _np.sqrt(ann_count_matrix.cell_sizes / _np.pi)
     )
-    # TODO: Can use prior nuc positions for initial centroids
-    # Calculate n_counts for each spot
-    ns_counts: _1DArrayType = _to_array(
-        ann_count_matrix.count_matrix.sum(axis=1), squeeze=True
-    )
-    ix_sorted_by_counts: _1DArrayType = _np.argsort(ns_counts)[::-1]
+    if nuclei_priorities is not None:
+        ix_sorted_by_counts: _1DArrayType = nuclei_priorities.copy()
+    else:
+        # Calculate n_counts for each spot
+        ns_counts: _1DArrayType = _to_array(
+            ann_count_matrix.count_matrix.sum(axis=1), squeeze=True
+        )
+        ix_sorted_by_counts: _1DArrayType = _np.argsort(ns_counts)[::-1]
     if verbose:
         _tqdm.write(f"Loading spatial distances..")
     dist_matrix: dict = {

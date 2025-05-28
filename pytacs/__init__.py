@@ -12,7 +12,7 @@
 
 
 __author__ = "Liu, Xindong"
-__version__ = "2025.5.27"  # alpha
+__version__ = "2025.5.28"  # alpha
 
 from .data import AnnDataPreparer, downsample_cells, compare_umap
 from .classifier import (

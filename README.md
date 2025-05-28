@@ -1,4 +1,4 @@
-# Pytacs - Python-implemented Topology-Aware Convoluting Spots
+# Pytacs - Python-implemented Topology-Aware Cell Segmentation
 
 ```
 Copyright (C) 2025 Xindong Liu

@@ -14,6 +14,7 @@ from .types import (
     _NumberType,
     _Nx2ArrayType,
 )
+from scipy.sparse import identity as _identity
 import scanpy as _sc
 import numpy as _np
 from scipy.spatial import cKDTree as _cKDTree  # to construct sparse distance matrix
@@ -301,29 +302,29 @@ def rw_aggregate(
         distances = distances.tocoo()
 
         # Compute inv_dist similarity using sparse operations: S_ij = 1 / (1 + d_ij)
-        similarities = _coo_matrix(
+        similarities_init = _coo_matrix(
             (1 / (1 + distances.data), (distances.row, distances.col)),
             shape=distances.shape,
         )
         del distances
-        similarities = similarities.tolil()
+        similarities_init = similarities_init.tolil()
     else:
-        similarities = _lil_matrix(
+        similarities_init = _lil_matrix(
             (distances_spatial.shape[0], distances_spatial.shape[1])
         )
-        similarities[ilocs_nonzero[:, 0], ilocs_nonzero[:, 1]] = (
+        similarities_init[ilocs_nonzero[:, 0], ilocs_nonzero[:, 1]] = (
             _rowwise_cosine_similarity(
                 embeds[ilocs_nonzero[:, 0], :],
                 embeds[ilocs_nonzero[:, 1], :],
             )
         )
-    similarities[
+    similarities_init[
         _np.arange(similarities.shape[0]), _np.arange(similarities.shape[0])
     ] = 1.0
-    similarities: _csr_matrix = similarities.tocsr()
+    similarities_init: _csr_matrix = similarities_init.tocsr()
 
-    similarities = _normalize_csr(
-        similarities
+    similarities_init = _normalize_csr(
+        similarities_init
     )  # Normalize similarities row-wise, making it probability-like
 
     candidate_cellids = _np.arange(
@@ -345,9 +346,8 @@ def rw_aggregate(
         "data": [],
     }  # final weight_matrix of all spots, gonna update
 
-    # Random Walk
-    if verbose:
-        _tqdm.write('Random walking..')
+    # Judge & Random Walk
+    similarities: _csr_matrix = _identity(similarities_init.shape[0], format='csr')  # start from Id matrix
     counter_celltypes_global = dict()  # counter of celltypes total
     for i_iter in range(max_iter):
         # Aggregate spots according to similarities
@@ -431,9 +431,10 @@ def rw_aggregate(
         else:
             _itor = range(steps_per_iter)
         for i_step in _itor:
-            similarities: _csr_matrix = similarities @ similarities
+            similarities: _csr_matrix = similarities @ similarities_init
             # Truncate propagation by max_propagation_radius for fast computation and stability.
             similarities: _coo_matrix = similarities.tocoo()
+            similarities.eliminate_zeros()
             # including diagonals
 
             mask = _np.zeros_like(similarities.data, dtype=bool)

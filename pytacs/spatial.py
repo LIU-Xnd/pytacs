@@ -319,7 +319,7 @@ def rw_aggregate(
             )
         )
     similarities_init[
-        _np.arange(similarities.shape[0]), _np.arange(similarities.shape[0])
+        _np.arange(similarities_init.shape[0]), _np.arange(similarities_init.shape[0])
     ] = 1.0
     similarities_init: _csr_matrix = similarities_init.tocsr()
 

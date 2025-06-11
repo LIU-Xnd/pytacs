@@ -839,6 +839,7 @@ class SpTypeSizeAnnCntMtx:
 
 # TODO: Parallel by chunking spatial_distances (50 hrs -> 50/n hrs)
 # DONE TODO: Use spatial_distances cache.
+# (KINDA FIXED) BUG: cellsize is in spots, but ranges_overlap, etc, are in units (e.g., 3um)
 def ctrbin_cellseg(
     ann_count_matrix: SpTypeSizeAnnCntMtx,
     coeff_overlap_constraint: float = 1.0,
@@ -866,10 +867,10 @@ def ctrbin_cellseg(
         and aggregation.
 
     coeff_overlap_constraint : float, optional (default=1.0)
-        A coefficient used to constrain cell overlap. In detail, an estimated range is used for
+        A coefficient used to constrain cell overlap. Ideally, this value should be diameter (in units) taken per spot.
+        In detail, an estimated range is used for
         removing cell centroids that are too close. This coefficient is used to multiply the
-        range so it increases (>1, resulting in less cells) or decreases (<1, resulting in more
-        cells) a little bit.
+        range so it increases or decreases a little bit.
     
     coeff_cellsize : float, optional (default=1.0)
         A coefficient used to slightly adjust cell sizes. Cell sizes are multiplied by this coeff,
@@ -888,9 +889,9 @@ def ctrbin_cellseg(
     n_samples_raw: int = ann_count_matrix.count_matrix.shape[0]
     if nuclei_priorities is not None:
         assert len(nuclei_priorities) == n_samples_raw
-    # Estimate overlap ranges by coeff * 2 * sqrt(S/pi)
+    # Estimate overlap ranges by coeff * 2 * sqrt(S * area_per_spot / pi)
     ranges_overlap: _1DArrayType = (
-        coeff_overlap_constraint * 2 * _np.sqrt(ann_count_matrix.cell_sizes / _np.pi)
+        coeff_overlap_constraint * _np.sqrt(ann_count_matrix.cell_sizes)
     )
     if nuclei_priorities is not None:
         ix_sorted_by_counts: _1DArrayType = nuclei_priorities.copy()
@@ -981,7 +982,8 @@ def ctrbin_cellseg_parallel(
     """
     Experimental. Use within `if __name__=='__main__':` statement!
     
-    See `ctrbin_cellseg` for params.
+    See `ctrbin_cellseg` for params. IMPORTANTLY, set `coeff_overlap_constraint` to
+    the averaged diameter taken by each spot (in units same as those in spatial_coordinates).
 
     Needs to provide `spatial_coordinates` corresponding to samples in
     `ann_count_matrix` to produce chunks.

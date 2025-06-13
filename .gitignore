@@ -1,7 +1,13 @@
 **/.ipynb_checkpoints/
 **/__pycache__/
 **/.mypy_cache/
-./NOTE
-./.vscode
-./ext_data/
-./ext_notebooks/
+NOTE
+.vscode
+ext_data/
+ext_notebooks/
+deprecated/
+img/
+output/
+.GITINCLUDE
+.jupyterlog
+next_commit.txt

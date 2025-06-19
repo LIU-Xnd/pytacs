@@ -15,6 +15,7 @@ from .types import (
     _Nx2ArrayType,
 )
 from scipy.sparse import identity as _identity
+from scipy.sparse import vstack as _vstack
 import scanpy as _sc
 import numpy as _np
 from scipy.spatial import cKDTree as _cKDTree  # to construct sparse distance matrix
@@ -34,6 +35,7 @@ from .utils import normalize_csr as _normalize_csr
 from .utils import prune_csr_per_row_cum_prob as _prune_csr_per_row_cum_prob
 from .utils import prune_csr_per_row_infl_point as _prune_csr_per_row_infl_point
 from .utils import rowwise_cosine_similarity as _rowwise_cosine_similarity
+from .utils import chunk_spatial as _chunk_spatial
 from itertools import product as _product
 from multiprocessing.pool import Pool as _Pool
 
@@ -100,7 +102,7 @@ def rw_aggregate(
     mode_embedding: _Literal["raw", "pc"] = "pc",
     n_pcs: int = 30,
     mode_metric: _Literal["inv_dist", "cosine"] = "inv_dist",
-    mode_aggregation: _Literal["weighted", "unweighted"] = "weighted",
+    mode_aggregation: _Literal["weighted", "unweighted"] = "unweighted",
     mode_prune: _Literal['inflection_point', 'proportional'] = 'inflection_point',
     min_points_to_keep: int = 1,
     mode_walk: _Literal["rw"] = "rw",
@@ -486,6 +488,164 @@ def rw_aggregate(
     if return_cell_sizes:
         result.dataframe["cell_size"] = cellsizes_confident
     return result
+
+
+def rw_aggregate_sequential(
+    st_anndata: _AnnData,
+    classifier: _LocalClassifier,
+    max_iter: int = 20,
+    steps_per_iter: int = 1,
+    nbhd_radius: float = 1.5,
+    max_propagation_radius: float = 6.0,
+    normalize_: bool = True,
+    log1p_: bool = True,
+    mode_embedding: _Literal["raw", "pc"] = "pc",
+    n_pcs: int = 30,
+    mode_metric: _Literal["inv_dist", "cosine"] = "inv_dist",
+    mode_aggregation: _Literal["weighted", "unweighted"] = "unweighted",
+    mode_prune: _Literal['inflection_point', 'proportional'] = 'inflection_point',
+    min_points_to_keep: int = 1,
+    mode_walk: _Literal["rw"] = "rw",
+    return_weight_matrix: bool = False,
+    return_cell_sizes: bool = True,
+    verbose: bool = True,
+    n_chunks: int = 9,
+) -> AggregationResult:
+    """
+    Experimental: A re-implementation of rw_aggregate() to ease memory cost by
+    trading memory with time. Might yield slightly different results due to
+    chunking operations. Some cache might be unable to be saved.
+
+    Perform iterative random-walk-based spot aggregation and classification refinement
+    for spatial transcriptomics data.
+
+    This function aggregates local spot neighborhoods using a random walk or
+    random walk with restart (RWR), then refines cell type predictions iteratively
+    using a local classifier and aggregated gene expression until confident.
+
+    Args:
+        st_anndata (_AnnData):
+            AnnData object containing spatial transcriptomics data.
+
+        classifier (_LocalClassifier):
+            A local cell-type classifier with `predict_proba` and `fit` methods, as well as
+            `threshold_confidence` attribute for confidence determination.
+
+        max_iter (int, optional):
+            Number of refinement iterations to perform.
+
+        steps_per_iter (int, optional):
+            Number of random walk steps to perform in each iteration.
+
+        nbhd_radius (float, optional):
+            Radius for defining local neighborhood in spatial graph construction.
+
+        max_propagation_radius (float, optional):
+            Radius for maximum possible random walk distance in spatial graph propagation.
+
+        normalize_ (bool, optional):
+            Whether to perform normalization on raw count matrix before building spatial graph.
+            Default is True.
+
+        log1p_ (bool, optional):
+            Whether to perform log1p on raw count matrix before building spatial graph. Default is True.
+
+        mode_embedding (Literal['raw', 'pc'], optional):
+            Embedding mode for similarity calculation.
+            'raw' uses the original expression matrix; 'pc' uses PCA-reduced data. Default is 'pc'.
+
+        n_pcs (int, optional):
+            Number of principal components to retain when `mode_embedding='pc'`.
+
+        mode_metric (Literal['inv_dist', 'cosine'], optional):
+            Distance or similarity metric to define transition weights between spots.
+
+        mode_aggregation (Literal['unweighted', 'weighted'], optional):
+            Aggregation strategy to combine neighborhood gene expression.
+            'unweighted' uses uniform averaging; 'weighted' uses transition probabilities.
+
+        mode_prune (Literal['inflection_point', 'proportional'], optional):
+            Type of pruning strategy. Defaults to inflection_point.
+
+        mode_walk (Literal['rw', 'rwr'], optional):
+            Type of random walk to perform:
+            'rw' for vanilla random walk,
+            'rwr' for random walk with restart. Default is 'rw'.
+
+        return_weight_matrix (bool, optional):
+            If True, will return weight_matrix in AggregationResult. Note this process may increase
+            computational time! In sequential mode, this must be False.
+
+        return_cell_sizes (bool, optional):
+            If True, will return cellsizes of confident cells in AggregationResult.dataframe. This process can
+            help improve binning accuracy for downstream analysis.
+
+        n_chunks (int, optional):
+            Number of chunks to split the spatial anndata into. Actual numbers might slightly vary.
+
+    Returns:
+        AggregationResult:
+            A dataclass containing:
+                - `dataframe`: DataFrame with predicted `cell_id`, `cell_type`, and confidence scores.
+                - `expr_matrix`: CSR matrix of aggregated expression for confident spots.
+                - `weight_matrix`: CSR matrix representing transition probabilities between all spots, if `return_weight_matrix`;
+                otherwise an empty matrix of the same shape.
+    """
+    assert return_weight_matrix == False
+    
+    chunk_indices: list[list[int]] = _chunk_spatial(
+        coords=st_anndata.obsm['spatial'],
+        n_chunks=n_chunks,
+    )
+    aggres_chunks: list[AggregationResult] = []
+    nrow_expr_matrix: int = 0
+    nrow_weight_matrix: int = 0  # placeholder
+    for i_chunk, indices_chunk in enumerate(chunk_indices):
+        if verbose:
+            _tqdm.write(f"Chunk {i_chunk+1}/{len(chunk_indices)}, with {len(indices_chunk)} points ..")
+        st_anndata_chunk = st_anndata[indices_chunk, :].copy()
+        aggres_chunks.append(
+            rw_aggregate(
+                st_anndata=st_anndata_chunk,
+                classifier=classifier,
+                max_iter=max_iter,
+                steps_per_iter=steps_per_iter,
+                nbhd_radius=nbhd_radius,
+                max_propagation_radius=max_propagation_radius,
+                normalize_=normalize_,
+                log1p_=log1p_,
+                mode_embedding=mode_embedding,
+                n_pcs=n_pcs,
+                mode_metric=mode_metric,
+                mode_aggregation=mode_aggregation,
+                mode_prune=mode_prune,
+                min_points_to_keep=min_points_to_keep,
+                mode_walk=mode_walk,
+                return_weight_matrix=return_weight_matrix,
+                return_cell_sizes=return_cell_sizes,
+                verbose=verbose,
+            )
+        )
+        nrow_expr_matrix += aggres_chunks[-1].expr_matrix.shape[0]
+        nrow_weight_matrix += aggres_chunks[-1].weight_matrix.shape[0]
+    
+    relabeled_dfs: list[_pd.DataFrame] = []
+    relabeled_weight_matrix: _csr_matrix = _csr_matrix((nrow_weight_matrix, nrow_weight_matrix))
+    stacked_expr_matrix = []
+    for aggres, indices in zip(aggres_chunks, chunk_indices):
+        df = aggres.dataframe.copy()
+        df['cell_id'] = df["cell_id"].apply(lambda i: indices[i])
+        stacked_expr_matrix.append(aggres.expr_matrix)
+    stacked_expr_matrix: _csr_matrix = _vstack(stacked_expr_matrix)
+    return AggregationResult(
+        dataframe=_pd.concat(
+            relabeled_dfs,
+            axis=0,
+            ignore_index=True,
+        ),
+        expr_matrix=stacked_expr_matrix,
+        weight_matrix=relabeled_weight_matrix,
+    )
 
 
 def extract_celltypes_full(

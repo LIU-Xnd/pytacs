@@ -12,7 +12,7 @@
 
 
 __author__ = "Liu, Xindong"
-__version__ = "2025.6.11"  # alpha
+__version__ = "2025.6.19"  # alpha
 
 from .data import AnnDataPreparer, downsample_cells, compare_umap
 from .classifier import (
@@ -24,6 +24,7 @@ from .classifier import (
 )
 from .spatial import (
     rw_aggregate,
+    rw_aggregate_sequential,
     extract_celltypes_full,
     cluster_spatial_domain,
     SpatialTypeAnnCntMtx,

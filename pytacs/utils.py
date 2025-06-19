@@ -7,6 +7,7 @@ from tqdm import tqdm as _tqdm
 from .types import (
     _AnnData,
     _NDArray,
+    _Nx2ArrayType,
     _UndefinedType,
     _UNDEFINED,
     _Iterable,
@@ -380,3 +381,48 @@ def rowwise_cosine_similarity(A: _np.ndarray, B: _np.ndarray) -> _NDArray[_np.fl
     denom[denom == 0.0] = 1e-8
 
     return dot / denom
+
+
+def chunk_spatial(
+    coords: _Nx2ArrayType,
+    n_chunks: int = 9,
+) -> list[list[int]]:
+    """
+    Split coordinates into ~n_chunks spatially rectangular bins.
+
+    Args:
+        coords: (N, 2) array of spatial coordinates.
+        n_chunks: Desired number of chunks (actual number may vary slightly).
+
+    Returns:
+        A list of lists of point indices in each chunk.
+    """
+    if not isinstance(coords, _np.ndarray):
+        coords = _np.array(coords)
+    if coords.ndim != 2 or coords.shape[1] != 2:
+        raise ValueError("Input coords must be of shape (N, 2).")
+
+    # Choose grid size: rows × cols ≈ n_chunks
+    n_rows = int(_np.sqrt(n_chunks))
+    n_cols = int(_np.ceil(n_chunks / n_rows))
+
+    x_min, y_min = coords.min(axis=0)
+    x_max, y_max = coords.max(axis=0)
+
+    x_bins = _np.linspace(x_min, x_max, n_cols + 1)
+    y_bins = _np.linspace(y_min, y_max, n_rows + 1)
+
+    # Find bin index for each point
+    x_indices = _np.digitize(coords[:, 0], x_bins) - 1
+    y_indices = _np.digitize(coords[:, 1], y_bins) - 1
+
+    # Clamp to stay in valid bin range
+    x_indices = _np.clip(x_indices, 0, n_cols - 1)
+    y_indices = _np.clip(y_indices, 0, n_rows - 1)
+
+    chunk_map = {}
+    for idx, (xi, yi) in enumerate(zip(x_indices, y_indices)):
+        chunk_id = yi * n_cols + xi
+        chunk_map.setdefault(chunk_id, []).append(idx)
+
+    return list(chunk_map.values())

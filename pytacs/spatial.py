@@ -635,6 +635,7 @@ def rw_aggregate_sequential(
     for aggres, indices in zip(aggres_chunks, chunk_indices):
         df = aggres.dataframe.copy()
         df['cell_id'] = df["cell_id"].apply(lambda i: indices[i])
+        relabeled_dfs.append(df)
         stacked_expr_matrix.append(aggres.expr_matrix)
     stacked_expr_matrix: _csr_matrix = _vstack(stacked_expr_matrix)
     return AggregationResult(

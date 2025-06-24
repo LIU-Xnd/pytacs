@@ -46,7 +46,14 @@ def spatial_distances(
     p_norm: _NumberType = 2,
     verbose: bool = True,
 ) -> None:
-    """Computes spatial distances matrix in csr_matrix format. Saved in place."""
+    """Computes spatial distances matrix in csr_matrix format. Saved in place.
+    
+    Might take large RAM. One way to ease is to split AnnData into small chunks
+    (using pytacs.chunk_spatial),
+    and compute seperately the spatial_distances. Finally you can sc.concat
+    them with pairwise=True.
+    
+    """
     if verbose:
         _tqdm.write('Loading spatial coordinates from .obsm["spatial"]..')
     ckdtree_spatial = _cKDTree(sp_adata.obsm["spatial"])
@@ -104,6 +111,7 @@ def rw_aggregate(
     mode_metric: _Literal["inv_dist", "cosine"] = "inv_dist",
     mode_aggregation: _Literal["weighted", "unweighted"] = "unweighted",
     mode_prune: _Literal['inflection_point', 'proportional'] = 'inflection_point',
+    cum_prob_keep: float = 0.5,
     min_points_to_keep: int = 1,
     mode_walk: _Literal["rw"] = "rw",
     return_weight_matrix: bool = False,
@@ -161,6 +169,10 @@ def rw_aggregate(
 
         mode_prune (Literal['inflection_point', 'proportional'], optional):
             Type of pruning strategy. Defaults to inflection_point.
+        
+        cum_prob_keep (float, optional):
+            If mode_prune is 'proportional', this value must be provide. The cumulative probability
+            above which neighboring spots to keep.
 
         mode_walk (Literal['rw', 'rwr'], optional):
             Type of random walk to perform:
@@ -458,7 +470,7 @@ def rw_aggregate(
         if mode_prune == 'proportional':
             similarities = _prune_csr_per_row_cum_prob(
                 csr_mat=similarities,
-                cum_prob_keep=0.5,
+                cum_prob_keep=cum_prob_keep,
                 tqdm_verbose=verbose,
             )
         else:
@@ -504,6 +516,7 @@ def rw_aggregate_sequential(
     mode_metric: _Literal["inv_dist", "cosine"] = "inv_dist",
     mode_aggregation: _Literal["weighted", "unweighted"] = "unweighted",
     mode_prune: _Literal['inflection_point', 'proportional'] = 'inflection_point',
+    cum_prob_keep: float = 0.5,
     min_points_to_keep: int = 1,
     mode_walk: _Literal["rw"] = "rw",
     return_weight_matrix: bool = False,
@@ -566,6 +579,10 @@ def rw_aggregate_sequential(
 
         mode_prune (Literal['inflection_point', 'proportional'], optional):
             Type of pruning strategy. Defaults to inflection_point.
+        
+        cum_prob_keep (float, optional):
+            If mode_prune is 'proportional', this value must be provide. The cumulative probability
+            above which neighboring spots to keep.
 
         mode_walk (Literal['rw', 'rwr'], optional):
             Type of random walk to perform:
@@ -619,6 +636,7 @@ def rw_aggregate_sequential(
                 mode_metric=mode_metric,
                 mode_aggregation=mode_aggregation,
                 mode_prune=mode_prune,
+                cum_prob_keep=cum_prob_keep,
                 min_points_to_keep=min_points_to_keep,
                 mode_walk=mode_walk,
                 return_weight_matrix=return_weight_matrix,
@@ -699,6 +717,48 @@ def extract_celltypes_full(
 
     return celltypes_full
 
+def extract_cell_sizes_full(
+    aggregation_result: AggregationResult,
+    size_undefined: int = 1,
+):
+    """
+    Extract the cell-size labels for all spots from an aggregation result, including
+    both confident and non-confident spots.
+
+    This function retrieves the cell-size information for each spot (cell) from the
+    aggregation result. The resulting cell-size
+    labels will be sorted by the cell ID. Any missing spots will be assigned
+    size `size_undefined`.
+
+    The spot IDs are assumed to be continuous from 0 to n_samples-1. If there are missing
+    spots in the data, they will be assumed as undefined type.
+
+    Parameters:
+    -----------
+    aggregation_result : AggregationResult
+        The result of the aggregation process, which includes cell-type predictions
+        for each spot, as well as their confidence levels.
+
+    size_undefined: int, optional (default=1)
+        Size to assign to undefined spots.
+
+    Returns:
+    --------
+    _NDArray[_np.str_]
+        A 1D array of cell-size labels for each spot, where each label corresponds
+        to a specific cell or region in the input dataset. The array will be sorted
+        by cell ID. Undefined spots will be assigned size `size_undefined`.
+
+    Notes:
+    ------
+    - This function includes both confident and non-confident spots.
+    - The function assumes that the aggregation result has cell-size labels accessible.
+    """
+    cellsizes = _np.ones(shape=(aggregation_result.weight_matrix.shape[0],), dtype=int)
+    if size_undefined != 1:
+        cellsizes[:] = size_undefined
+    cellsizes[aggregation_result.dataframe['cell_id'].values] = aggregation_result.dataframe['cell_size'].values
+    return cellsizes
 
 @_dataclass
 class SpatialTypeAnnCntMtx:
@@ -1001,11 +1061,14 @@ class SpTypeSizeAnnCntMtx:
 # TODO: Parallel by chunking spatial_distances (50 hrs -> 50/n hrs)
 # DONE TODO: Use spatial_distances cache.
 # (KINDA FIXED) BUG: cellsize is in spots, but ranges_overlap, etc, are in units (e.g., 3um)
+# DONE TODO: attitude_to_undefined param
 def ctrbin_cellseg(
     ann_count_matrix: SpTypeSizeAnnCntMtx,
     coeff_overlap_constraint: float = 1.0,
     coeff_cellsize: float = 1.0,
     nuclei_priorities: _1DArrayType | None = None,
+    type_name_undefined: str = 'Undefined',
+    attitude_to_undefined: _Literal['tolerant', 'exclusive'] = 'tolerant',
     verbose: bool = True,
 ) -> _1DArrayType:
     """
@@ -1043,10 +1106,16 @@ def ctrbin_cellseg(
         An array of spot ids in a certain order, e.g., the order of nuclei staining intensities. If provided,
         uses the order to generate cell centroids sequentially. If None, uses n_counts order (L1-order).
 
+    attitude_to_undefined : _Literal['tolerant', 'exclusive'], optional (default='tolerant')
+        Attitude towards undefined spots. 'tolerant': cells of a defined type
+        may contain spots of undefined type. 'exclusive': cells of a defined
+        type strictly contain spots of the same type, excluding undefined type.
+        
     Returns:
     --------
     The result is a 1d-array of cell id masks, with -1 indicating not-assigned.
     """
+    assert attitude_to_undefined in ['tolerant', 'exclusive']
     n_samples_raw: int = ann_count_matrix.count_matrix.shape[0]
     if nuclei_priorities is not None:
         assert len(nuclei_priorities) == n_samples_raw
@@ -1107,9 +1176,14 @@ def ctrbin_cellseg(
         ix_nbors: _1DArrayType = dist_matrix.getrow(i_centroid).nonzero()[1]
         # Filter out different types
         label_centroid: str = ann_count_matrix.cell_types[i_centroid]
-        whr_sametype: _1DArrayType = (
-            ann_count_matrix.cell_types[ix_nbors] == label_centroid
-        )
+        if attitude_to_undefined == 'tolerant':
+            whr_sametype: _1DArrayType = (
+                ann_count_matrix.cell_types[ix_nbors] == label_centroid
+            ) | (ann_count_matrix.cell_types[ix_nbors] == type_name_undefined)
+        else:
+            whr_sametype: _1DArrayType = (
+                ann_count_matrix.cell_types[ix_nbors] == label_centroid
+            )
         ix_nbors = ix_nbors[whr_sametype]
         if len(ix_nbors) == 0:
             cell_masks[i_centroid] = i_centroid
@@ -1137,6 +1211,10 @@ def ctrbin_cellseg_parallel(
     ann_count_matrix: SpTypeSizeAnnCntMtx,
     spatial_coordinates: _Nx2ArrayType,
     coeff_overlap_constraint: float = 1.0,
+    coeff_cellsize: float = 1.0,
+    nuclei_priorities: _1DArrayType | None = None,
+    type_name_undefined: str = 'Undefined',
+    attitude_to_undefined: _Literal['tolerant', 'exclusive'] = 'tolerant',
     n_workers: int = 40,
     verbose: bool = True,
 ) -> _1DArrayType:
@@ -1221,6 +1299,10 @@ def ctrbin_cellseg_parallel(
                 cell_sizes=ann_count_matrix.cell_sizes[fov_table["indices"][i_fov]],
             ),
             coeff_overlap_constraint,
+            coeff_cellsize,
+            nuclei_priorities,
+            type_name_undefined,
+            attitude_to_undefined,
             verbose,
         )
         for i_fov in range(len(fov_table["indices"]))

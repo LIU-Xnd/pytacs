@@ -12,7 +12,7 @@
 
 
 __author__ = "Liu, Xindong"
-__version__ = "2025.6.24"  # alpha
+__version__ = "2025.6.25"  # alpha
 
 from .utils import chunk_spatial
 from .data import AnnDataPreparer, downsample_cells, compare_umap
@@ -30,6 +30,7 @@ from .spatial import (
     extract_cell_sizes_full,
     cluster_spatial_domain,
     spatial_distances,
+    spatial_distances_sequential,
     SpatialTypeAnnCntMtx,
     celltype_refined_bin,
     ctrbin_cellseg,

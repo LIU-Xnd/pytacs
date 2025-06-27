@@ -75,6 +75,31 @@ def spatial_distances(
         )
     return
 
+def spatial_distances_sequential(
+    sp_adata: _AnnData,
+    max_spatial_distance: _NumberType,
+    p_norm: _NumberType = 2,
+    n_chunks: int = 9,
+    verbose: bool = True,
+) -> None:
+    """EXPERIMENTAL: Compute spatial distances by chunks to save memory. Might slightly differ from expected results.
+    
+    Computes spatial distances matrix in csr_matrix format. Saved in place.
+    """
+    indices_chunks = _chunk_spatial(coords=sp_adata.obsm['spatial'], n_chunks=n_chunks)
+    dummy_adatas = [
+        _sc.AnnData(
+            X=_csr_matrix((len(ixs), sp_adata.shape[1])),
+            obsm={'spatial': sp_adata.obsm['spatial'][ixs, :]},
+        ) for ixs in indices_chunks
+    ]
+    for i, dummy in enumerate(dummy_adatas):
+        if verbose:
+            _tqdm.write(f'Processing chunk {i+1} ..')
+        spatial_distances(dummy, max_spatial_distance=max_spatial_distance, p_norm=p_norm, verbose=verbose)
+    adata_final = _sc.concat(dummy_adatas, pairwise=True)
+    sp_adata.obsp['spatial_distances'] = adata_final.obsp['spatial_distances']
+    return
 
 @_dataclass
 class AggregationResult:
@@ -1231,72 +1256,22 @@ def ctrbin_cellseg_parallel(
     """
     if verbose:
         _tqdm.write(f"Estimating chunk config..")
-    xrange: tuple[_NumberType, _NumberType] = (
-        spatial_coordinates[:, 0].min(),
-        spatial_coordinates[:, 0].max(),
-    )
-    yrange: tuple[_NumberType, _NumberType] = (
-        spatial_coordinates[:, 1].min(),
-        spatial_coordinates[:, 1].max(),
-    )
-    assert xrange[1] - xrange[0] > 0
-    assert yrange[1] - yrange[0] > 0
-    yxratio: float = (yrange[1] - yrange[0]) / (xrange[1] - xrange[0])
-    n_chunks_along_x: int = max(1, int(_np.sqrt(n_workers / yxratio)))
-    n_chunks_along_y: int = max(1, int(n_chunks_along_x * yxratio))
-    cut_points_x: _1DArrayType = _np.linspace(
-        start=xrange[0],
-        stop=xrange[1],
-        num=n_chunks_along_x + 1,
-    )
-    cut_points_y: _1DArrayType = _np.linspace(
-        start=yrange[0],
-        stop=yrange[1],
-        num=n_chunks_along_y + 1,
-    )
+    chunk_indices = [ixs for ixs in _chunk_spatial(spatial_coordinates, n_workers) if ixs]
     if verbose:
-        _tqdm.write(
-            f"Chunk size: {cut_points_x[1]-cut_points_x[0]:.1f} x {cut_points_y[1]-cut_points_y[0]:.1f} (The ones at the edges might be a little bit bigger)"
-        )
-        _tqdm.write(f"Total {n_chunks_along_x} x {n_chunks_along_y} chunks.")
-    cut_points_x[0] = -_np.inf
-    cut_points_x[-1] = _np.inf
-    cut_points_y[0] = -_np.inf
-    cut_points_y[-1] = _np.inf
-    # Build fovs (field of view)
-    if verbose:
-        _tqdm.write("Building chunks..")
-    fov_table: dict = {
-        "upperleft": [],  # tuple
-        "lowerright": [],  # tuple
-        "indices": [],  # array
-    }
-    fov_table["upperleft"] = list(_product(cut_points_x[:-1], cut_points_y[:-1]))
-    fov_table["lowerright"] = list(_product(cut_points_x[1:], cut_points_y[1:]))
-    fov_table["indices"] = [
-        _np.arange(spatial_coordinates.shape[0])[
-            (spatial_coordinates[:, 0] >= fov_table["upperleft"][i_fov][0])
-            * (spatial_coordinates[:, 0] < fov_table["lowerright"][i_fov][0])
-            * (spatial_coordinates[:, 1] >= fov_table["upperleft"][i_fov][1])
-            * (spatial_coordinates[:, 1] < fov_table["lowerright"][i_fov][1])
-        ]
-        for i_fov in range(len(fov_table["upperleft"]))
-    ]
-    assert len(fov_table["indices"]) == len(fov_table["lowerright"])
+        _tqdm.write(f"Total {len(chunk_indices)} chunks.")
     if verbose:
         _tqdm.write("Chunks ready. Allocating jobs..")
-    # Chunk items: (ann_count_matrix[chunked], coeff, verbose)
     chunks: list[tuple] = [
         (
             SpTypeSizeAnnCntMtx(
                 count_matrix=ann_count_matrix.count_matrix[
-                    fov_table["indices"][i_fov], :
+                    ixs, :
                 ].copy(),
                 spatial_distances=ann_count_matrix.spatial_distances[
-                    fov_table["indices"][i_fov], :
-                ][:, fov_table["indices"][i_fov]].copy(),
-                cell_types=ann_count_matrix.cell_types[fov_table["indices"][i_fov]],
-                cell_sizes=ann_count_matrix.cell_sizes[fov_table["indices"][i_fov]],
+                    ixs, :
+                ][:, ixs].copy(),
+                cell_types=ann_count_matrix.cell_types[ixs],
+                cell_sizes=ann_count_matrix.cell_sizes[ixs],
             ),
             coeff_overlap_constraint,
             coeff_cellsize,
@@ -1305,11 +1280,11 @@ def ctrbin_cellseg_parallel(
             attitude_to_undefined,
             verbose,
         )
-        for i_fov in range(len(fov_table["indices"]))
+        for ixs in chunk_indices
     ]
     if verbose:
         _tqdm.write("Running jobs..")
-    with _Pool(len(fov_table["indices"])) as _p:
+    with _Pool(len(chunk_indices)) as _p:
         results: list[_1DArrayType] = _p.starmap(func=ctrbin_cellseg, iterable=chunks)
     if verbose:
         _tqdm.write("Gathering and sorting results..")
@@ -1318,7 +1293,7 @@ def ctrbin_cellseg_parallel(
     for i_fov in range(len(results)):
         cellmasks_sub: _1DArrayType = results[i_fov]
         cellmasks_remap: _1DArrayType = cellmasks_sub.copy()
-        original_indices: _1DArrayType = fov_table["indices"][i_fov]
+        original_indices: _1DArrayType = chunk_indices[i_fov]
         indices_global += list(original_indices)
         for ix_sub, ix_original in enumerate(original_indices):
             whr_thisix = cellmasks_sub == ix_sub
@@ -1616,3 +1591,93 @@ def aggregate_spots_to_cells_parallel(
     if verbose:
         _tqdm.write("Done.")
     return res
+
+@_dataclass
+class NucleiMasks:
+    """
+    Nuclei masks.
+
+    Attrs:
+        coordinates (_Nx2ArrayType): coordinates of points.
+
+        masks (_1DArrayType): labels of nuclei (expected 0,1,2 ..),
+        with -1 indicating no signal (unassigned).
+    """
+    coordinates: _Nx2ArrayType
+    masks: _1DArrayType
+
+def _get_centroids_from_masks(
+    coords: _Nx2ArrayType,
+    cell_masks: _1DArrayType,
+    return_cell_id: bool = False,
+) -> _Nx2ArrayType:
+    """Get mean coordinates of each cell as the centroids.
+    
+    Args:
+        coords (_Nx2ArrayType): coordinates of each points.
+
+        cell_masks (_1DArrayType): integer masks of each point. -1 indicates unassigned.
+
+    Returns:
+        _Nx2ArrayType: centroids coordinates of each cell (ordered by id).
+        
+        or tuple[_Nx2ArrayType, _1DArrayType]: (centroids_coords, cell_ids) if `return_cell_id` is True.
+    """
+    assert cell_masks.shape[0] == coords.shape[0]
+    cell_ids_pool = _np.sort(_np.unique(cell_masks))
+    cell_ids_pool = cell_ids_pool[cell_ids_pool!=-1]
+    n_cells = cell_ids_pool.shape[0]
+    coords_centroids = _np.empty(shape=(n_cells, 2))
+    for i_cell, id_cell in enumerate(cell_ids_pool):
+        coords_centroids[i_cell, :] = _np.mean(
+            a=coords[cell_masks==id_cell, :],
+            axis=0,
+        )
+    return (
+        coords_centroids if not return_cell_id else (
+            coords_centroids,
+            cell_ids_pool,
+        )
+    )
+
+def _get_voronoi_indices(
+    centroids: _Nx2ArrayType,
+    other_points: _Nx2ArrayType,
+) -> _1DArrayType:
+    tree = _cKDTree(centroids)
+    _, labels = tree.query(other_points)
+    return labels
+
+def vonoroi_indices(
+    sp_adata: _sc.AnnData,
+    nuclei_coords: _Nx2ArrayType | NucleiMasks,
+    obsm_name_spatial_coords: str = 'spatial',
+    key_added: str = 'voronoi',
+) -> None:
+    """Add to .obs the Voronoi indices each spot belongs to.
+    
+    Args:
+        sp_adata (AnnData): spatial AnnData.
+
+        nuclei_coords: Can be 1) pre-computed coordinates of each 
+        centroid of nuclei; 2) nuclei masks whose centroids are to
+        be computed.
+
+    Update:
+        Updates AnnData's .obs with voronoi indices annotation.
+    """
+    if isinstance(nuclei_coords, NucleiMasks):
+        nuclei_coords, region_ids = _get_centroids_from_masks(
+            nuclei_coords.coordinates,
+            cell_masks=nuclei_coords.masks,
+            return_cell_id=True,
+        )
+    else:
+        region_ids = _np.arange(nuclei_coords.shape[0])
+    voronoi_ix = _get_voronoi_indices(
+        centroids=nuclei_coords,
+        other_points=sp_adata.obsm[obsm_name_spatial_coords],
+    )
+    sp_adata.obs[key_added] = region_ids[voronoi_ix]
+    return
+    

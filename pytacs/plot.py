@@ -249,3 +249,16 @@ def plot_boundaries_on_grids(
         y=anchor_points[anchor_masks, 1],
         s=1,
     )
+
+
+_RGBType: type = tuple[int, int, int] | str # e.g., '1fff2b'
+def color_cells(
+    spannpoints: SpAnnPoints,
+    n_colors: int | list[_RGBType] = 6,
+):
+    """
+    Color cells for visualization.
+    """
+    pass
+    
+    # TODO

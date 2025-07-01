@@ -142,6 +142,7 @@ def rw_aggregate(
     return_weight_matrix: bool = False,
     return_cell_sizes: bool = True,
     verbose: bool = True,
+    skip_init_classification: bool = True,
 ) -> AggregationResult:
     """
     Perform iterative random-walk-based spot aggregation and classification refinement
@@ -387,6 +388,58 @@ def rw_aggregate(
 
     # Judge & Random Walk
     similarities: _csr_matrix = _identity(similarities_init.shape[0], format='csr')  # start from Id matrix
+
+    def _rw_and_prune(curr_sim: _csr_matrix):
+        # Random walk
+        if verbose:
+            _itor = _tqdm(
+                range(steps_per_iter),
+                desc="Random walk..",
+                ncols=60,
+            )
+        else:
+            _itor = range(steps_per_iter)
+        for i_step in _itor:
+            curr_sim: _csr_matrix = curr_sim @ similarities_init
+            # Truncate propagation by max_propagation_radius for fast computation and stability.
+            curr_sim: _coo_matrix = curr_sim.tocoo()
+            curr_sim.eliminate_zeros()
+            # including diagonals
+
+            mask = _np.zeros_like(curr_sim.data, dtype=bool)
+            for i in range(len(curr_sim.data)):
+                if (curr_sim.row[i], curr_sim.col[i]) in query_pool_propagation:
+                    mask[i] = True
+
+            # Filter the data to keep only selected values
+            data_kept = curr_sim.data[mask]
+            curr_sim: _coo_matrix = _coo_matrix(
+                (data_kept, (curr_sim.row[mask], curr_sim.col[mask])),
+                shape=curr_sim.shape,
+            )
+            # Convert back
+            curr_sim: _csr_matrix = curr_sim.tocsr()
+            # Re-normalize
+            curr_sim: _csr_matrix = _normalize_csr(curr_sim)
+        # prune
+        if mode_prune == 'proportional':
+            curr_sim = _prune_csr_per_row_cum_prob(
+                csr_mat=curr_sim,
+                cum_prob_keep=cum_prob_keep,
+                tqdm_verbose=verbose,
+            )
+        else:
+            curr_sim = _prune_csr_per_row_infl_point(
+                csr_mat=curr_sim,
+                min_points_to_keep=min_points_to_keep,
+                tqdm_verbose=verbose,
+            )
+        return curr_sim
+    
+    if skip_init_classification:
+        if verbose:
+            _tqdm.write('Skip the first round of classification for single spots.')
+        similarities = _rw_and_prune(similarities)
     counter_celltypes_global = dict()  # counter of celltypes total
     for i_iter in range(max_iter):
         # Aggregate spots according to similarities
@@ -461,50 +514,8 @@ def rw_aggregate(
         if len(candidate_cellids) == 0:
             break
         # Random walk
-        if verbose:
-            _itor = _tqdm(
-                range(steps_per_iter),
-                desc="Random walk..",
-                ncols=60,
-            )
-        else:
-            _itor = range(steps_per_iter)
-        for i_step in _itor:
-            similarities: _csr_matrix = similarities @ similarities_init
-            # Truncate propagation by max_propagation_radius for fast computation and stability.
-            similarities: _coo_matrix = similarities.tocoo()
-            similarities.eliminate_zeros()
-            # including diagonals
-
-            mask = _np.zeros_like(similarities.data, dtype=bool)
-            for i in range(len(similarities.data)):
-                if (similarities.row[i], similarities.col[i]) in query_pool_propagation:
-                    mask[i] = True
-
-            # Filter the data to keep only selected values
-            data_kept = similarities.data[mask]
-            similarities: _coo_matrix = _coo_matrix(
-                (data_kept, (similarities.row[mask], similarities.col[mask])),
-                shape=similarities.shape,
-            )
-            # Convert back
-            similarities: _csr_matrix = similarities.tocsr()
-            # Re-normalize
-            similarities: _csr_matrix = _normalize_csr(similarities)
-        # prune
-        if mode_prune == 'proportional':
-            similarities = _prune_csr_per_row_cum_prob(
-                csr_mat=similarities,
-                cum_prob_keep=cum_prob_keep,
-                tqdm_verbose=verbose,
-            )
-        else:
-            similarities = _prune_csr_per_row_infl_point(
-                csr_mat=similarities,
-                min_points_to_keep=min_points_to_keep,
-                tqdm_verbose=verbose,
-            )
-
+        similarities = _rw_and_prune(similarities)
+    
     weight_matrix: _coo_matrix = _coo_matrix(
         (weight_matrix["data"], (weight_matrix["rows"], weight_matrix["cols"])),
         shape=(st_anndata.X.shape[0], st_anndata.X.shape[0]),
@@ -548,6 +559,7 @@ def rw_aggregate_sequential(
     return_cell_sizes: bool = True,
     verbose: bool = True,
     n_chunks: int = 9,
+    skip_init_classification: bool = True,
 ) -> AggregationResult:
     """
     Experimental: A re-implementation of rw_aggregate() to ease memory cost by
@@ -667,6 +679,7 @@ def rw_aggregate_sequential(
                 return_weight_matrix=return_weight_matrix,
                 return_cell_sizes=return_cell_sizes,
                 verbose=verbose,
+                skip_init_classification=skip_init_classification,
             )
         )
         nrow_expr_matrix += aggres_chunks[-1].expr_matrix.shape[0]

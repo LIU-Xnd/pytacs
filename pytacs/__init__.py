@@ -15,7 +15,12 @@ __author__ = "Liu, Xindong"
 __version__ = "2025.6.25"  # alpha
 
 from .utils import chunk_spatial
-from .data import AnnDataPreparer, downsample_cells, compare_umap
+from .data import (
+    AnnDataPreparer,
+    binX,
+    downsample_cells,
+    compare_umap,
+)
 from .classifier import (
     SVM,
     # GaussianNaiveBayes,
@@ -38,6 +43,8 @@ from .spatial import (
     SpTypeSizeAnnCntMtx,
     aggregate_spots_to_cells,
     aggregate_spots_to_cells_parallel,
+    NucleiMasks,
+    vonoroi_indices,
 )
 from .plot import (
     SpAnnPoints,

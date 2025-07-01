@@ -752,3 +752,63 @@ def compare_umap(
         ax.set_xlim(xlim_universal)
         ax.set_ylim(ylim_universal)
     return axes
+
+
+def binX(
+    adata: _sc.AnnData,
+    obsm_name_spatial_coords: str = 'spatial',
+    key_added: str | None = None,
+    binsize: int = 48,
+) -> _sc.AnnData:
+    """
+    Bin a spatial trx anndata.
+
+    Args:
+        adata (AnnData): spatial trx.
+
+        obsm_name_spatial_coords (str): name of key in obsm of spatial coordinates.
+
+        key_added (str | None): an auxiliary obs column will be added to adata, with name
+        defaulting to 'spatial_binX' (when this parameter set to None) where X is the binsize.
+
+        binsize (int): size of bin.
+    
+    Return:
+        AnnData: binned anndata with spatial coordinates saved in obsm with the same name as adata.
+    """
+    assert isinstance(binsize, int)
+    if key_added is None:
+        key_added = f'spatial_bin{binsize}'
+    adata.obsm[key_added] = adata.obsm[obsm_name_spatial_coords] // binsize
+    # Build index
+    index_loc2id = dict()
+    for i in _tqdm(range(adata.shape[0]),desc='Building index'):
+        loc = tuple(adata.obsm[key_added][i,:])
+        if loc not in index_loc2id:
+            index_loc2id[loc] = [i]
+        else:
+            index_loc2id[loc].append(i)
+    n_new = len(index_loc2id)
+    cols_ = []
+    rows_ = []
+    for i_new, loc in enumerate(_tqdm(index_loc2id, desc='Binning')):
+        cols_.extend(index_loc2id[loc])
+        rows_.extend([i_new for _ in range(len(index_loc2id[loc]))])
+        
+    W_leftmul = _csr_matrix(
+        (
+            _np.ones(adata.shape[0]),
+            (
+                rows_,
+                cols_,
+            ),
+        ),
+        shape=(n_new, adata.shape[0]),
+    )
+    X_new = (W_leftmul @ adata.X).astype(adata.X.dtype)
+    coords_new = _np.array(tuple(index_loc2id.keys()))
+    return _sc.AnnData(
+        X=X_new,
+        var=_pd.DataFrame(index=adata.var.index),
+        obsm={obsm_name_spatial_coords: coords_new},
+    )

@@ -299,15 +299,10 @@ def rw_aggregate(
     # Boundaries for propagation
     if verbose:
         _tqdm.write('Building random-walk boundaries..')
-    ilocs_propagation = _np.array(
-        list(zip(distances_propagation.row, distances_propagation.col))
-    )
 
-    rows_nonzero, cols_nonzero = (
-        ilocs_propagation[:, 0],
-        ilocs_propagation[:, 1],
-    )
-    del ilocs_propagation
+    rows_nonzero = distances_propagation.row
+    cols_nonzero = distances_propagation.col
+
     rows_nonzero = _np.concatenate(
         [
             rows_nonzero,
@@ -321,8 +316,6 @@ def rw_aggregate(
     query_pool_propagation = set(
         zip(rows_nonzero, cols_nonzero)
     )  # all possible nonzero ilocs for propagation
-    del rows_nonzero
-    del cols_nonzero
     distances = _lil_matrix(
         (distances_spatial.shape[0], distances_spatial.shape[1]),
     )
@@ -334,10 +327,9 @@ def rw_aggregate(
     del embed_loadings
     if verbose:
         _tqdm.write('Computing topology graph..')
-    ilocs_nonzero = _np.array(list(zip(distances_spatial.row, distances_spatial.col)))
     if mode_metric == "inv_dist":
-        distances[ilocs_nonzero[:, 0], ilocs_nonzero[:, 1]] = _np.linalg.norm(
-            embeds[ilocs_nonzero[:, 0], :] - embeds[ilocs_nonzero[:, 1], :], axis=1
+        distances[rows_nonzero, cols_nonzero] = _np.linalg.norm(
+            embeds[rows_nonzero, :] - embeds[cols_nonzero, :], axis=1
         )
         distances = distances.tocoo()
 
@@ -352,12 +344,15 @@ def rw_aggregate(
         similarities_init = _lil_matrix(
             (distances_spatial.shape[0], distances_spatial.shape[1])
         )
-        similarities_init[ilocs_nonzero[:, 0], ilocs_nonzero[:, 1]] = (
+        similarities_init[rows_nonzero, cols_nonzero] = (
             _rowwise_cosine_similarity(
-                embeds[ilocs_nonzero[:, 0], :],
-                embeds[ilocs_nonzero[:, 1], :],
+                embeds[rows_nonzero, :],
+                embeds[cols_nonzero, :],
             )
         )
+    
+    del rows_nonzero
+    del cols_nonzero
     similarities_init[
         _np.arange(similarities_init.shape[0]), _np.arange(similarities_init.shape[0])
     ] = 1.0

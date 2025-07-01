@@ -316,6 +316,10 @@ def rw_aggregate(
     query_pool_propagation = set(
         zip(rows_nonzero, cols_nonzero)
     )  # all possible nonzero ilocs for propagation
+
+    del rows_nonzero
+    del cols_nonzero
+    
     distances = _lil_matrix(
         (distances_spatial.shape[0], distances_spatial.shape[1]),
     )
@@ -328,8 +332,8 @@ def rw_aggregate(
     if verbose:
         _tqdm.write('Computing topology graph..')
     if mode_metric == "inv_dist":
-        distances[rows_nonzero, cols_nonzero] = _np.linalg.norm(
-            embeds[rows_nonzero, :] - embeds[cols_nonzero, :], axis=1
+        distances[distances_spatial.row, distances_spatial.col] = _np.linalg.norm(
+            embeds[distances_spatial.row, :] - embeds[distances_spatial.col, :], axis=1
         )
         distances = distances.tocoo()
 
@@ -344,15 +348,14 @@ def rw_aggregate(
         similarities_init = _lil_matrix(
             (distances_spatial.shape[0], distances_spatial.shape[1])
         )
-        similarities_init[rows_nonzero, cols_nonzero] = (
+        similarities_init[distances_spatial.row, distances_spatial.col] = (
             _rowwise_cosine_similarity(
-                embeds[rows_nonzero, :],
-                embeds[cols_nonzero, :],
+                embeds[distances_spatial.row, :],
+                embeds[distances_spatial.col, :],
             )
         )
     
-    del rows_nonzero
-    del cols_nonzero
+    
     similarities_init[
         _np.arange(similarities_init.shape[0]), _np.arange(similarities_init.shape[0])
     ] = 1.0

@@ -101,6 +101,69 @@ def spatial_distances_sequential(
     sp_adata.obsp['spatial_distances'] = adata_final.obsp['spatial_distances']
     return
 
+def spatial_distances_sequential_lossless(
+    sp_adata: _AnnData,
+    max_spatial_distance: _NumberType,
+    p_norm: _NumberType = 2,
+    n_chunks: int = 9,
+    verbose: bool = True,
+) -> None:
+    """EXPERIMENTAL: Compute spatial distances by chunks to save memory, with boundary-aware correction.
+    
+    Computes spatial distances matrix in csr_matrix format. Saved in place.
+    """
+    indices_chunks = _chunk_spatial(coords=sp_adata.obsm['spatial'], n_chunks=n_chunks)
+    dummy_adatas = [
+        _sc.AnnData(
+            X=_csr_matrix((len(ixs), sp_adata.shape[1])),
+            obsm={'spatial': sp_adata.obsm['spatial'][ixs, :]},
+        ) for ixs in indices_chunks
+    ]
+    for i, dummy in enumerate(dummy_adatas):
+        if verbose:
+            _tqdm.write(f'Processing chunk {i+1} ..')
+        dummy.obs_names = sp_adata.obs_names[indices_chunks[i]]  # track row mapping
+        spatial_distances(dummy, max_spatial_distance=max_spatial_distance, p_norm=p_norm, verbose=verbose)
+    adata_final = _sc.concat(dummy_adatas, pairwise=True)
+
+    # Edge-case fix: cross-boundary distances
+    if verbose:
+        _tqdm.write('Processing cross-chunk boundary distances ..')
+    # Assume: indices_chunks is a list of index arrays for each chunk
+    rows, cols, dists = [], [], []
+    n_chunks = len(indices_chunks)
+
+    for i in range(n_chunks):
+        ixs_i = indices_chunks[i]
+        coords_i = sp_adata.obsm['spatial'][ixs_i]
+        tree_i = _cKDTree(coords_i)
+
+        for j in range(i + 1, n_chunks):  # only later chunks to avoid duplication
+            ixs_j = indices_chunks[j]
+            coords_j = sp_adata.obsm['spatial'][ixs_j]
+            tree_j = _cKDTree(coords_j)
+
+            # Query i-points against j-tree
+            neighbors_ij = tree_j.query_ball_point(coords_i, r=max_spatial_distance, p=p_norm)
+
+            for local_i, nbrs in enumerate(neighbors_ij):
+                global_i = ixs_i[local_i]
+                for local_j in nbrs:
+                    global_j = ixs_j[local_j]
+                    dist = _np.linalg.norm(sp_adata.obsm['spatial'][global_i] - sp_adata.obsm['spatial'][global_j], ord=p_norm)
+                    rows.append(global_i)
+                    cols.append(global_j)
+                    dists.append(dist)
+                    # Optional: also store (global_j, global_i) if symmetric
+
+    # Construct sparse matrix from inter-chunk (boundary) distances
+    boundary_matrix = _csr_matrix((dists, (rows, cols)), shape=(sp_adata.n_obs, sp_adata.n_obs))
+    boundary_matrix.eliminate_zeros()
+    final_matrix = adata_final.obsp['spatial_distances'].maximum(boundary_matrix)
+    sp_adata.obsp['spatial_distances'] = final_matrix
+    return
+
+
 @_dataclass
 class AggregationResult:
     """Results of spot aggregation.

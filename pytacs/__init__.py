@@ -36,6 +36,7 @@ from .spatial import (
     cluster_spatial_domain,
     spatial_distances,
     spatial_distances_sequential,
+    spatial_distances_sequential_lossless,
     SpatialTypeAnnCntMtx,
     celltype_refined_bin,
     ctrbin_cellseg,

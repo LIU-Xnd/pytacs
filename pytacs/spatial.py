@@ -206,6 +206,7 @@ def rw_aggregate(
     return_cell_sizes: bool = True,
     verbose: bool = True,
     skip_init_classification: bool = True,
+    topology_nbhd_radius: float | None = None,
 ) -> AggregationResult:
     """
     Perform iterative random-walk-based spot aggregation and classification refinement
@@ -276,6 +277,11 @@ def rw_aggregate(
             If True, will return cellsizes of confident cells in AggregationResult.dataframe. This process can
             help improve binning accuracy for downstream analysis.
 
+        topology_nbhd_radius (float | None, optional):
+            If provided, will use this radius to construct the topology relation matrix
+            and embeds.
+            If None, will use `nbhd_radius`.
+
     Returns:
         AggregationResult:
             A dataclass containing:
@@ -289,41 +295,10 @@ def rw_aggregate(
     assert mode_aggregation in ["weighted", "unweighted"]
     assert mode_prune in ['inflection_point', 'proportional']
     assert mode_walk in ["rw"]
+    if topology_nbhd_radius is None:
+        topology_nbhd_radius = nbhd_radius
 
-    if normalize_:
-        X_normalized = _normalize_csr(st_anndata.X.astype(float)).copy()
-    else:
-        X_normalized = st_anndata.X.astype(float).copy()
-    if log1p_:
-        X_normalized.data = _np.log1p(X_normalized.data)
-    # Get SVD transformer
-    if mode_embedding == "pc":
-        n_pcs: int = min(n_pcs, st_anndata.shape[1])
-        if n_pcs > 100:
-            _tqdm.write(
-                f"Warning: {n_pcs} pcs might be too large. Take care of your ram."
-            )
-        svd = _TruncatedSVD(
-            n_components=n_pcs,
-        )
-        if verbose:
-            _tqdm.write(f"Performing truncated PCA (n_pcs={n_pcs})..")
-        svd.fit(
-            X=X_normalized,
-        )
-        embed_loadings: _np.ndarray = svd.components_  # k x n_features
-        del svd
-    else:
-        n_features = st_anndata.shape[1]
-        if n_features > 100:
-            _tqdm.write(
-                f"Number of features {n_features} might be too large. Take care of your ram."
-            )
-        embed_loadings: _np.ndarray = _np.identity(
-            n=n_features,
-        )
-    # Generate topology relation matrix
-    # Get spatial neighborhood
+    # >>> Get spatial neighborhood
     if verbose:
         _tqdm.write(f"Constructing spatial graph..")
     # Try to load from .obsp
@@ -382,15 +357,83 @@ def rw_aggregate(
 
     del rows_nonzero
     del cols_nonzero
+    # <<<
+
+    X: _csr_matrix = st_anndata.X.astype(float).copy()
+    # Aggregate spots within topology_nbhd_radius:
+    if topology_nbhd_radius > 0:
+        if verbose:
+            _tqdm.write(f"Aggregating spots within topology_nbhd_radius={topology_nbhd_radius}..")
+        spatial_rows = distances_propagation.nonzero()[0]
+        spatial_cols = distances_propagation.nonzero()[1]
+        spatial_data = distances_propagation.data
+        whr_within_nbhd_topo = spatial_data <= topology_nbhd_radius
+        if verbose:
+            _tqdm.write('Building spot-wise profiles..')
+        W_topo = _csr_matrix(
+            (
+                _np.ones(_np.sum(whr_within_nbhd_topo)+distances_propagation.shape[0]),
+                (
+                    _np.concatenate(
+                        [
+                            spatial_rows[whr_within_nbhd_topo],
+                            _np.arange(distances_propagation.shape[0])  # Add diagonols
+                        ]
+                    ),
+                    _np.concatenate(
+                        [
+                            spatial_cols[whr_within_nbhd_topo],
+                            _np.arange(distances_propagation.shape[0])  # Add diagonals
+                        ]
+                    )
+                ),
+            ),
+            shape=distances_propagation.shape,
+        )
+        del spatial_data, spatial_cols, spatial_rows
+        
+        X = W_topo @ X
+
+    if normalize_:
+        X = _normalize_csr(X)
+    if log1p_:
+        X.data = _np.log1p(X.data)
+    # Get SVD transformer
+    if mode_embedding == "pc":
+        n_pcs: int = min(n_pcs, st_anndata.shape[1])
+        if n_pcs > 100:
+            _tqdm.write(
+                f"Warning: {n_pcs} pcs might be too large. Take care of your ram."
+            )
+        svd = _TruncatedSVD(
+            n_components=n_pcs,
+        )
+        if verbose:
+            _tqdm.write(f"Performing truncated PCA (n_pcs={n_pcs})..")
+        svd.fit(
+            X=X,
+        )
+        embed_loadings: _np.ndarray = svd.components_  # k x n_features
+        del svd
+    else:
+        n_features = st_anndata.shape[1]
+        if n_features > 100:
+            _tqdm.write(
+                f"Number of features {n_features} might be too large. Take care of your ram."
+            )
+        embed_loadings: _np.ndarray = _np.identity(
+            n=n_features,
+        )
     
-    distances = _lil_matrix(
+    # >>> Generate topology relation matrix
+    distances = _lil_matrix(  # dist of spot-wise profiles
         (distances_spatial.shape[0], distances_spatial.shape[1]),
     )
     # Get defined embedding
     if verbose:
         _tqdm.write('Getting defined embeddings..')
-    embeds: _np.ndarray = X_normalized @ embed_loadings.T
-    del X_normalized
+    embeds: _np.ndarray = X @ embed_loadings.T
+    del X
     del embed_loadings
     if verbose:
         _tqdm.write('Computing topology graph..')
@@ -407,7 +450,7 @@ def rw_aggregate(
         )
         del distances
         similarities_init = similarities_init.tolil()
-    else:
+    else:  # mode_metric == "cosine"
         similarities_init = _lil_matrix(
             (distances_spatial.shape[0], distances_spatial.shape[1])
         )
@@ -469,7 +512,11 @@ def rw_aggregate(
 
             mask = _np.zeros_like(curr_sim.data, dtype=bool)
             for i in range(len(curr_sim.data)):
-                if (curr_sim.row[i], curr_sim.col[i]) in query_pool_propagation:
+                if (
+                        (curr_sim.row[i], curr_sim.col[i]) in query_pool_propagation
+                    ) or (
+                        curr_sim.row[i] == curr_sim.col[i]  # self-loop
+                    ):
                     mask[i] = True
 
             # Filter the data to keep only selected values
@@ -1364,7 +1411,12 @@ def ctrbin_cellseg_parallel(
         _tqdm.write("Gathering and sorting results..")
     cellmasks_global: list[_NumberType] = []
     indices_global: list[_NumberType] = []
-    for i_fov in range(len(results)):
+    if verbose:
+        itor_ = _tqdm(range(len(results)), desc="Remapping cellmasks", ncols=60)
+    else:
+        itor_ = range(len(results))
+    # Remap cellmasks to global indices
+    for i_fov in itor_:
         cellmasks_sub: _1DArrayType = results[i_fov]
         cellmasks_remap: _1DArrayType = cellmasks_sub.copy()
         original_indices: _1DArrayType = chunk_indices[i_fov]

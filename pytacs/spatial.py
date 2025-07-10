@@ -83,6 +83,8 @@ def spatial_distances_sequential(
     verbose: bool = True,
 ) -> None:
     """EXPERIMENTAL: Compute spatial distances by chunks to save memory. Might slightly differ from expected results.
+
+    WARNING: In practical tests, this method is still memory-intense. Use with care!
     
     Computes spatial distances matrix in csr_matrix format. Saved in place.
     """
@@ -161,6 +163,7 @@ def spatial_distances_sequential_lossless(
     boundary_matrix.eliminate_zeros()
     final_matrix = adata_final.obsp['spatial_distances'].maximum(boundary_matrix)
     sp_adata.obsp['spatial_distances'] = final_matrix
+    sp_adata.uns['max_spatial_distance'] = max_spatial_distance
     return
 
 
@@ -350,7 +353,7 @@ def rw_aggregate(
     cols_nonzero = _np.concatenate(
         [cols_nonzero, _np.arange(distances_propagation.shape[0])]  # including selves
     )
-    del distances_propagation
+    distances_propagation
     query_pool_propagation = set(
         zip(rows_nonzero, cols_nonzero)
     )  # all possible nonzero ilocs for propagation
@@ -393,7 +396,7 @@ def rw_aggregate(
         del spatial_data, spatial_cols, spatial_rows
         
         X = W_topo @ X
-
+    del distances_propagation
     if normalize_:
         X = _normalize_csr(X)
     if log1p_:
@@ -668,6 +671,7 @@ def rw_aggregate_sequential(
     verbose: bool = True,
     n_chunks: int = 9,
     skip_init_classification: bool = True,
+    topology_nbhd_radius: float | None = None,
 ) -> AggregationResult:
     """
     Experimental: A re-implementation of rw_aggregate() to ease memory cost by
@@ -788,6 +792,7 @@ def rw_aggregate_sequential(
                 return_cell_sizes=return_cell_sizes,
                 verbose=verbose,
                 skip_init_classification=skip_init_classification,
+                topology_nbhd_radius=topology_nbhd_radius,
             )
         )
         nrow_expr_matrix += aggres_chunks[-1].expr_matrix.shape[0]
@@ -1277,6 +1282,13 @@ def ctrbin_cellseg(
             ann_count_matrix.count_matrix.sum(axis=1), squeeze=True
         )
         ix_sorted_by_counts: _1DArrayType = _np.argsort(ns_counts)[::-1]
+        # Move undefined spots to the end of the list
+        ix_sorted_by_counts = _np.concatenate(
+            [
+                ix_sorted_by_counts[ann_count_matrix.cell_types[ix_sorted_by_counts] != type_name_undefined],
+                ix_sorted_by_counts[ann_count_matrix.cell_types[ix_sorted_by_counts] == type_name_undefined],
+            ]
+        )
     if verbose:
         _tqdm.write(f"Loading spatial distances..")
     dist_matrix: dict = {

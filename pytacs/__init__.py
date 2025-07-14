@@ -12,12 +12,16 @@
 
 
 __author__ = "Liu, Xindong"
-__version__ = "2025.6.25"  # alpha
+__version__ = "2025.7.14"  # alpha
 
 from .utils import chunk_spatial
 from .data import (
     AnnDataPreparer,
     binX,
+    annotate_mt,
+    annotate_ribosomal,
+    merge_gene_version,
+    scale_genes,
     downsample_cells,
     compare_umap,
 )
@@ -37,6 +41,10 @@ from .spatial import (
     spatial_distances,
     spatial_distances_sequential,
     spatial_distances_sequential_lossless,
+    spatial_distances_knn,
+    spatial_distances_knn_sequential,
+    spatial_connectivities_knn,
+    combined_connectivities,
     SpatialTypeAnnCntMtx,
     celltype_refined_bin,
     ctrbin_cellseg,

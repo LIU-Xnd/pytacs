@@ -4,10 +4,13 @@ from .types import (
     _NDArray,
     _csr_matrix,
     _dok_matrix,
+    _lil_matrix,
     _Literal,
+    _Iterable,
     _UNDEFINED,
     _UndefinedType,
 )
+from collections import defaultdict as _defaultdict
 
 import scanpy as _sc
 import pandas as _pd
@@ -18,6 +21,7 @@ from scipy.spatial import cKDTree as _cKDTree
 
 from scipy.cluster.hierarchy import linkage as _linkage
 from scipy.cluster.hierarchy import fcluster as _fcluster
+from scipy.sparse import hstack as _hstack
 
 
 from tqdm import tqdm as _tqdm
@@ -812,3 +816,134 @@ def binX(
         var=_pd.DataFrame(index=adata.var.index),
         obsm={obsm_name_spatial_coords: coords_new},
     )
+
+def annotate_mt(
+    adata: _AnnData,
+    startswith: str | _Iterable[str] = "MT-",
+    key_added: str = 'mt',
+) -> None:
+    """
+    Annotate mitochondrial genes in an AnnData object.
+
+    Args:
+        adata (_AnnData): The AnnData object to process.
+        startswith (str): The prefix of mitochondrial genes to remove. Defaults to "MT-".
+        key_added (str): The key under which to store the annotation in `adata.var`.
+            Defaults to 'mt'.
+    """
+    assert isinstance(adata, _AnnData)
+    if isinstance(startswith, str):
+        startswith = [startswith]
+    startswith = tuple(startswith)
+    mt_genes = adata.var.index.str.startswith(startswith)
+    adata.var[key_added] = mt_genes
+    if mt_genes.sum() == 0:
+        _tqdm.write(f"Warning: No mitochondrial genes found starting with '{startswith}'!")
+    else:
+        _tqdm.write(f"Annotated {mt_genes.sum()} mitochondrial genes starting with '{startswith}' in adata.var['{key_added}'].")
+    return
+
+def annotate_ribosomal(
+    adata: _AnnData,
+    startswith: str | _Iterable[str] = ("RPL", "RPS"),
+    key_added: str = 'ribosomal',
+) -> None:
+    """
+    Annotate ribosomal genes in an AnnData object.
+
+    Args:
+        adata (_AnnData): The AnnData object to process.
+        startswith (str | Iterable[str]): The prefix of ribosomal genes to remove.
+            Defaults to ("RPL", "RPS").
+        key_added (str): The key under which to store the annotation in `adata.var`.
+            Defaults to 'ribosomal'.
+    """
+    assert isinstance(adata, _AnnData)
+    if isinstance(startswith, str):
+        startswith = [startswith]
+    ribosomal_genes = adata.var.index.str.startswith(tuple(startswith))
+    adata.var[key_added] = ribosomal_genes
+    if ribosomal_genes.sum() == 0:
+        _tqdm.write(f"Warning: No ribosomal genes found starting with {startswith}!")
+    else:
+        _tqdm.write(f"Annotated {ribosomal_genes.sum()} ribosomal genes starting with {startswith} in adata.var['{key_added}'].")
+    return
+
+def merge_gene_version(
+    adata: _AnnData,
+    version_sep: str = ".",
+) -> _AnnData:
+    """
+    Merge gene versions in an AnnData object. Keep the maximum counts among versions of gene.
+
+    Args:
+        adata (_AnnData): The AnnData object to process.
+        version_sep (str): The separator used to split gene names and versions. Defaults to ".".
+
+    Returns:
+        _AnnData: A new AnnData object with merged gene versions.
+    """
+    
+    var_names = adata.var_names
+    base_names = var_names.str.split(version_sep).str[0]
+
+    # Build indices of the same base gene
+    gene_to_indices = _defaultdict(list)
+    for idx, name in enumerate(base_names):
+        gene_to_indices[name].append(idx)
+    
+    # Prepare for building new matrix
+    merged_columns = []
+    new_var_names = []
+
+    _tqdm.write('Converting to column-efficient mode..')
+    X_old = adata.X.copy().tocsc()
+
+    for base_name, idxs in _tqdm(gene_to_indices.items()):
+        if len(idxs) == 1:
+            col = X_old[:, idxs[0]]
+        else:
+            cols = X_old[:, idxs].tocsc()
+            col = cols.max(axis=1)
+        merged_columns.append(col)
+        new_var_names.append(base_name)
+    
+    # Stack
+    X_new = _csr_matrix(_hstack(merged_columns, format='csr'))
+    
+    adata_merged = _AnnData(
+        X=X_new,
+        obs=adata.obs.copy(),
+        var=_pd.DataFrame(index=new_var_names),
+        obsm=adata.obsm.copy(),
+        uns=adata.uns.copy(),
+    )
+
+    return adata_merged
+
+
+def scale_genes(
+    adata: _AnnData,
+) -> None:
+    """Scale each gene in adata.X so that the maximum value per gene is 1.
+
+    Modifies adata.X in place.
+
+    Args:
+        adata (_AnnData): AnnData object with expression matrix in adata.X
+    """
+    # First check if there's zero gene
+    X = adata.X.copy().tocsc()
+
+    max_per_gene = X.max(axis=0).toarray()
+    whr_zero = (max_per_gene==0)
+    if whr_zero.sum() > 0:
+        _tqdm.write('Warning: exist genes with 0 counts!')
+        max_per_gene[whr_zero] = 1
+    X = _csr_matrix(
+        X.multiply(
+            1.0 / max_per_gene
+        )
+    )
+    adata.X = X
+    return

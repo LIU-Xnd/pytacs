@@ -341,7 +341,7 @@ def combined_connectivities(
     sp_adata.uns['neighbors_'+key_added]['connectivities_key'] = key_added
     if verbose:
         _tqdm.write(f'Saved combined connectivities in .obsp["{key_added}"].')
-        _tqdm.write(f'To make this take effect, use neighbors_key="neighbors_{key_added}" when calling sc.tl.umap')
+        _tqdm.write(f'To make this take effect, use neighbors_key="neighbors_{key_added}" when calling sc.tl.umap, and use obsp="{key_added}" when calling sc.tl.leiden')
     return
 
 
@@ -1399,6 +1399,7 @@ def ctrbin_cellseg(
     type_name_undefined: str = 'Undefined',
     attitude_to_undefined: _Literal['tolerant', 'exclusive'] = 'tolerant',
     verbose: bool = True,
+    allow_reassign: bool = False,
 ) -> _1DArrayType:
     """
     Cell-Type-Refined Bin with cell-size estimated.
@@ -1427,9 +1428,7 @@ def ctrbin_cellseg(
     
     coeff_cellsize : float, optional (default=1.0)
         A coefficient used to slightly adjust cell sizes. Cell sizes are multiplied by this coeff,
-        so that a larger (or smaller) set of cells is resulted. For example, if `coeff_overlap_constraint`
-        is kind of large, then the number of cells will be smaller, in which case it is recommended to set
-        this parameter to >1.0 to match this modification.
+        so that a larger (or smaller) set of cells is resulted.
     
     nuclei_priorities : 1DArray | None, optional (default=None)
         An array of spot ids in a certain order, e.g., the order of nuclei staining intensities. If provided,
@@ -1450,7 +1449,7 @@ def ctrbin_cellseg(
         assert len(nuclei_priorities) == n_samples_raw
     # Estimate overlap ranges by coeff * 2 * sqrt(S * area_per_spot / pi)
     ranges_overlap: _1DArrayType = (
-        coeff_overlap_constraint * _np.sqrt(ann_count_matrix.cell_sizes)
+        coeff_overlap_constraint * _np.sqrt(ann_count_matrix.cell_sizes * coeff_cellsize)
     )
     if nuclei_priorities is not None:
         ix_sorted_by_counts: _1DArrayType = nuclei_priorities.copy()
@@ -1522,7 +1521,8 @@ def ctrbin_cellseg(
             )
         ix_nbors = ix_nbors[whr_sametype]
         if len(ix_nbors) == 0:
-            cell_masks[i_centroid] = i_centroid
+            if cell_masks[i_centroid] == -1 or allow_reassign:
+                cell_masks[i_centroid] = i_centroid
             continue
         dists_nbors: _1DArrayType = _to_array(
             dist_matrix[i_centroid, ix_nbors], squeeze=True
@@ -1536,8 +1536,13 @@ def ctrbin_cellseg(
                 : max(1, cellsize - 1)
             ]
         ]
-        cell_masks[ix_aggregate] = i_centroid
-        cell_masks[i_centroid] = i_centroid
+        if not allow_reassign:
+            whr_unassigned = (cell_masks[ix_aggregate] == -1)
+            cell_masks[ix_aggregate[whr_unassigned]] = i_centroid
+        else:
+            cell_masks[ix_aggregate] = i_centroid
+        if cell_masks[i_centroid] == -1 or allow_reassign:
+            cell_masks[i_centroid] = i_centroid
         # Remove too-close from centroid candidates
         cell_candidates_bool[ix_nbors[dists_nbors < ranges_overlap[i_centroid]]] = False
     return cell_masks
@@ -1553,6 +1558,7 @@ def ctrbin_cellseg_parallel(
     attitude_to_undefined: _Literal['tolerant', 'exclusive'] = 'tolerant',
     n_workers: int = 40,
     verbose: bool = True,
+    allow_reassign: bool = False,
 ) -> _1DArrayType:
     """
     Experimental. Use within `if __name__=='__main__':` statement!
@@ -1590,6 +1596,7 @@ def ctrbin_cellseg_parallel(
             type_name_undefined,
             attitude_to_undefined,
             verbose,
+            allow_reassign,
         )
         for ixs in chunk_indices
     ]

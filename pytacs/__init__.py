@@ -12,9 +12,12 @@
 
 
 __author__ = "Liu, Xindong"
-__version__ = "2025.7.14"  # alpha
+__version__ = "2025.7.26"  # alpha
 
-from .utils import chunk_spatial
+from .utils import (
+    chunk_spatial,
+    reinit_index,
+)
 from .data import (
     AnnDataPreparer,
     binX,

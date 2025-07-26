@@ -916,7 +916,9 @@ def merge_gene_version(
         obs=adata.obs.copy(),
         var=_pd.DataFrame(index=new_var_names),
         obsm=adata.obsm.copy(),
+        obsp=adata.obsp.copy(),
         uns=adata.uns.copy(),
+        layers=adata.layers.copy(),
     )
 
     return adata_merged

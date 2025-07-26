@@ -251,6 +251,26 @@ def plot_boundaries_on_grids(
     )
 
 
+def pie(cell_types: _np.ndarray, title: str = 'Cell Type Proportions', show: bool = True):
+    from collections import Counter
+    import matplotlib.pyplot as plt
+    cell_types = dict(Counter(cell_types))
+    labels = list(cell_types.keys())
+    counts = list(cell_types.values())
+    buff = sorted(zip(labels, counts))
+    labels = [x[0] for x in buff]
+    counts = [x[1] for x in buff]
+    plt.pie(counts, labels=labels, autopct='%1.1f%%')
+    plt.title(title)
+    plt.axis('equal')
+    if show:
+        plt.show()
+        return
+    else:
+        return plt.gcf()
+
+
+
 _RGBType: type = tuple[int, int, int] | str # e.g., '1fff2b'
 def color_cells(
     spannpoints: SpAnnPoints,

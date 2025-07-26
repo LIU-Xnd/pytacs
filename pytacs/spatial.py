@@ -1394,7 +1394,7 @@ class SpTypeSizeAnnCntMtx:
 def ctrbin_cellseg(
     ann_count_matrix: SpTypeSizeAnnCntMtx,
     coeff_overlap_constraint: float = 1.0,
-    coeff_cellsize: float = 1.0,
+    coeff_cellsize: float = 1.0 * 5.73,  # magic number
     nuclei_priorities: _1DArrayType | None = None,
     type_name_undefined: str = 'Undefined',
     attitude_to_undefined: _Literal['tolerant', 'exclusive'] = 'tolerant',
@@ -1714,10 +1714,8 @@ def cluster_spatial_domain(
     for i_grid in _tqdm(
         range(n_grids),
         desc="Compute celltype proportions",
-        ncols=60,
     ):
-        dist_nbors = _to_array(dist_matrix[i_grid, :], squeeze=True)
-        iloc_nbors = _np.where(dist_nbors > 0)[0]
+        iloc_nbors = dist_matrix[i_grid].nonzero()[1]
         if len(iloc_nbors) == 0:
             continue
         ct_nbors = cell_types[iloc_nbors]

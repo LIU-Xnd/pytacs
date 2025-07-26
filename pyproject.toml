@@ -1,6 +1,6 @@
 [project]
 name = "pytacs"
-version = "2025.6.25"
+version = "2025.7.26"
 description = "Pytacs: Python-implemented Topology-Aware Cell Segmentation for high-resolution spatial transcriptomics"
 authors = [
     {name = "Xindong Liu",email = "lqxnds@foxmail.com"}
@@ -9,11 +9,14 @@ license = "GPL3"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "numpy (>=1.26.4,<2.0.0)",
-    "pandas (>=2.2.3,<3.0.0)",
-    "scanpy (>=1.10.4,<2.0.0)",
-    "scikit-learn (>=1.5.2,<2.0.0)",
-    "scipy (>=1.14.1,<2.0.0)",
+    "numpy (>=1.26.4,<1.27.0)",
+    "pandas (>=2.2.3,<2.3.0)",
+    "scanpy (>=1.10.4,<1.11.0)",
+    "scikit-learn (>=1.5.2,<1.6.0)",
+    "scipy (>=1.14.1,<1.15.0)",
+    "matplotlib (>=3.9.2,<3.10.0)",
+    "seaborn (>=0.13.2,<0.14.0)",
+    "dill (>=0.3.8,<0.4.0)",
 ]
 
 

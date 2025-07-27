@@ -597,7 +597,7 @@ def rw_aggregate(
         embed_loadings: _np.ndarray = svd.components_  # k x n_features
         del svd
     else:
-        n_features = st_anndata.shape[1]
+        n_features = X.shape[1]
         if n_features > 100:
             _tqdm.write(
                 f"Number of features {n_features} might be too large. Take care of your ram."

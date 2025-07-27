@@ -540,7 +540,7 @@ def rw_aggregate(
     del cols_nonzero
     # <<<
     
-    X: _csr_matrix = st_anndata[:,st_anndata.var.isin(classifier._genes)].X.astype(float).copy()
+    X: _csr_matrix = st_anndata[:,st_anndata.var.index.isin(classifier._genes)].X.astype(float).copy()
     # Aggregate spots within topology_nbhd_radius:
     if topology_nbhd_radius > 0:
         if verbose:

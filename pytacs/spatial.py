@@ -581,7 +581,7 @@ def rw_aggregate(
         X.data = _np.log1p(X.data)
     # Get SVD transformer
     if mode_embedding == "pc":
-        n_pcs: int = min(n_pcs, st_anndata.shape[1])
+        n_pcs: int = min(n_pcs, X.shape[1])
         if n_pcs > 100:
             _tqdm.write(
                 f"Warning: {n_pcs} pcs might be too large. Take care of your ram."

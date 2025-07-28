@@ -1,4 +1,4 @@
-# pytacs: Python Topology-Aware Convoluting Spots -
+# pytacs: Python Topology-Aware Cell Segmentation -
 #  an improved version of TopACT (https://gitlab.com/kfbenjamin/topact)
 #  implementation.
 
@@ -12,7 +12,7 @@
 
 
 __author__ = "Liu, Xindong"
-__version__ = "2025.7.26"  # alpha
+__version__ = "2025.7.29"  # alpha
 
 from .utils import (
     chunk_spatial,
@@ -59,6 +59,7 @@ from .spatial import (
     vonoroi_indices,
 )
 from .plot import (
+    pie,
     SpAnnPoints,
     get_boundaries,
     plot_boundaries,

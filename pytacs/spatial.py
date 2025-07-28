@@ -1394,7 +1394,7 @@ class SpTypeSizeAnnCntMtx:
 def ctrbin_cellseg(
     ann_count_matrix: SpTypeSizeAnnCntMtx,
     coeff_overlap_constraint: float = 1.0,
-    coeff_cellsize: float = 1.0 * 5.73,  # magic number
+    coeff_cellsize: float = 1.0,  # magic number 5.73
     nuclei_priorities: _1DArrayType | None = None,
     type_name_undefined: str = 'Undefined',
     attitude_to_undefined: _Literal['tolerant', 'exclusive'] = 'tolerant',

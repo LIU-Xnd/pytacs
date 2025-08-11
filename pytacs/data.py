@@ -949,3 +949,26 @@ def scale_genes(
     )
     adata.X = X
     return
+
+
+def sort_by_coords(
+    anndata: _AnnData,
+    major_axis: _Literal['x', 'y', 0, 1] = 'x',
+) -> _AnnData:
+    """
+    major_axis: if 'x' or 0, sort by x first; if 'y' or 1, sort by y first.
+
+    NOTE:
+        This function DOES NOT re-init obs indices after operation.
+    """
+    assert 'spatial' in anndata.obsm_keys()
+    assert major_axis in ['x', 'y', 0, 1]
+    keys = [
+        anndata.obsm['spatial'][:,1],
+        anndata.obsm['spatial'][:,0],
+    ]
+    if major_axis in ['y', 1]:
+        keys = [keys[1], keys[0]]
+    
+    ix_sort = _np.lexsort(keys=keys)
+    return anndata[ix_sort].copy()

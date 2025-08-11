@@ -44,6 +44,7 @@ from .utils import (
     prune_csr_per_row_infl_point as _prune_csr_per_row_infl_point,
     rowwise_cosine_similarity as _rowwise_cosine_similarity,
     to_array as _to_array,
+    reinit_index as _reinit_index,
 )
 
 
@@ -2001,4 +2002,97 @@ def vonoroi_indices(
     )
     sp_adata.obs[key_added] = region_ids[voronoi_ix]
     return
+
+
+def align_coords(
+    coords: _Nx2ArrayType,
+    offsets: tuple[int, int] | None = None,
+) -> _Nx2ArrayType | tuple[_Nx2ArrayType, tuple[int, int]]:
+    """
+    Shifts the lower-left-most corner of the coordinates of integer type to (0,0).
+    If not of interger dtype, an int() conversion will be applied first.
     
+    :param coords: N x 2 coordinates of points. Typically of integer type.
+    :type coords: _Nx2ArrayType
+    :param offsets: If specified, use this instead of the lower-left-most point as the shifted (0,0).
+    :type offsets: tuple[int, int] | None
+    :return: Shifted coordinates of integer type if offsets specified; otherwise
+        a tuple of shifted coordinates and offsets (xmin, ymin).
+    :rtype: _Nx2ArrayType | tuple[_Nx2ArrayType, tuple[int, int]]
+    """
+    if coords.dtype is not _np.dtype('int'):
+        coords = coords.astype(int)
+    
+    _return_offsets = False
+    if offsets is None:
+        _return_offsets = True
+        xmin = coords[:,0].min()
+        ymin = coords[:,1].min()
+        offsets = (xmin, ymin)
+    else:
+        offsets = (int(_np.round(offsets[0])), int(_np.round(offsets[1])))
+    coords[:,0] -= offsets[0]
+    coords[:,1] -= offsets[1]
+    
+    if _return_offsets:
+        return (
+            coords,
+            offsets,
+        )
+    return coords
+
+
+def transfer_label(
+    adata_to: _AnnData,
+    adata_from: _AnnData,
+    obsname_label: str,
+    obsmname_spatial: str = 'spatial',
+) -> None:
+    """
+    Transfer label information from `adata_from` to `adata_to` using Voronoi-based spatial mapping.
+
+    Each observation in `adata_to` is assigned the label from the nearest observation in `adata_from`,
+    based on the coordinates in `obsmname_spatial`.
+
+    Parameters
+    ----------
+    adata_to : AnnData
+        Target AnnData object to receive transferred labels.
+    adata_from : AnnData
+        Source AnnData object containing the label information.
+    obsname_label : str
+        Column name in `adata_from.obs` containing the labels to transfer.
+    obsmname_spatial : str, optional (default: "spatial")
+        Key in `.obsm` of both AnnData objects where spatial coordinates are stored.
+
+    Returns
+    -------
+    None
+        The function modifies `adata_to.obs` in place by adding the new label column.
+    """
+    assert obsname_label in adata_from.obs_keys()
+    assert obsmname_spatial in adata_to.obsm_keys()
+    assert obsmname_spatial in adata_from.obsm_keys()
+
+    _reinit_index(adata_from, colname_to_save_oldIndex='__old_index')
+    _reinit_index(adata_to, '__old_index')
+    vonoroi_indices(
+        adata_to,
+        nuclei_coords=adata_from.obsm[obsmname_spatial],
+        obsm_name_spatial_coords=obsmname_spatial,
+        key_added='__voronoi_transfer',
+    )
+    # Vectorize label transfer
+    idx_map = adata_to.obs['__voronoi_transfer'].astype(str)
+    label_map = adata_from.obs[obsname_label]
+    adata_to.obs[obsname_label] = idx_map.map(label_map)
+
+    # Restore original indices
+    adata_from.obs.index = adata_from.obs['__old_index']
+    adata_from.obs.index.name = None
+    adata_to.obs.index = adata_to.obs['__old_index']
+    adata_to.obs.index.name = None
+    del adata_to.obs['__voronoi_transfer']
+    del adata_to.obs['__old_index']
+    del adata_from.obs['__old_index']
+    return

@@ -3,6 +3,7 @@ from dataclasses import dataclass as _dataclass
 from scipy.spatial.ckdtree import cKDTree as _cKDTree
 from tqdm import tqdm as _tqdm
 import seaborn as _sns
+import matplotlib.pyplot as _plt
 from .types import (
     _NumberType,
     _Nx2ArrayType,
@@ -253,25 +254,135 @@ def plot_boundaries_on_grids(
 
 def pie(cell_types: _np.ndarray, title: str = 'Cell Type Proportions', show: bool = True):
     from collections import Counter
-    import matplotlib.pyplot as plt
+
     cell_types = dict(Counter(cell_types))
     labels = list(cell_types.keys())
     counts = list(cell_types.values())
     buff = sorted(zip(labels, counts))
     labels = [x[0] for x in buff]
     counts = [x[1] for x in buff]
-    plt.pie(counts, labels=labels, autopct='%1.1f%%')
-    plt.title(title)
-    plt.axis('equal')
+    _plt.pie(counts, labels=labels, autopct='%1.1f%%')
+    _plt.title(title)
+    _plt.axis('equal')
     if show:
-        plt.show()
+        _plt.show()
         return
     else:
-        return plt.gcf()
+        return _plt.gcf()
+
+def calculate_proportions(
+    cell_types: _np.ndarray,
+) -> tuple[list[str], list[float]]:
+    """
+    Calculate the proportion of each unique label in a 1D array of cell types.
+
+    Parameters
+    ----------
+    cell_types : np.ndarray
+        A 1D numpy array (or array-like) containing categorical cell type labels (e.g., strings).
+        Repeated entries indicate higher counts of that cell type.
+
+    Returns
+    -------
+    labels : list of str
+        Sorted list of unique cell type labels.
+
+    proportions : list of float
+        Corresponding proportions of each label, in the same order as `labels`. 
+        Each value is normalized to sum to 1.
+
+    Example
+    -------
+    >>> calculate_proportions(np.array(['T', 'B', 'T', 'NK']))
+    (['B', 'NK', 'T'], [0.25, 0.25, 0.5])
+    """
+
+    from collections import Counter
+    from typing import NamedTuple
+    class CellTypeProportions(NamedTuple):
+        labels: list[str]
+        proportions: list[float]
+
+    cell_types = dict(Counter(cell_types))
+    labels = list(cell_types.keys())
+    counts = list(cell_types.values())
+    buff = sorted(zip(labels, counts))
+    labels = [x[0] for x in buff]
+    counts = [x[1] for x in buff]
+    n_total = sum(counts)
+    props = [c/n_total for c in counts]
+    return CellTypeProportions(
+        labels=labels,
+        proportions=props,
+    )
+
+def plot_stacked_barplot(
+        proportions,
+        sample_labels=None,
+        type_labels=None,
+        figsize=(8, 5),
+        show=True,
+):
+    """
+    Plot a stacked barplot from a matrix of proportions.
+
+    Parameters
+    ----------
+    proportions : array-like of shape (n_samples, n_types)
+        A 2D array where each row corresponds to a sample, and each column corresponds to 
+        a proportion of a specific type (e.g., cell type proportions).
+
+    sample_labels : list of str, optional
+        Labels for each sample (x-axis). If None, samples will be labeled as "Sample 1", "Sample 2", etc.
+
+    type_labels : list of str, optional
+        Labels for each type (legend). If None, types will be labeled as "Type 1", "Type 2", etc.
+
+    figsize : tuple, optional (default: (8, 5))
+        Size of the matplotlib figure.
+
+    Returns
+    -------
+    None
+        The function displays a matplotlib stacked bar plot.
+    """
+    proportions = _np.asarray(proportions)
+    n_samples, n_types = proportions.shape
+
+    if sample_labels is None:
+        sample_labels = [f'Sample {i+1}' for i in range(n_samples)]
+
+    if type_labels is None:
+        type_labels = [f'Type {i+1}' for i in range(n_types)]
+
+    x = _np.arange(n_samples)
+    bottom = _np.zeros(n_samples)
+
+    fig, ax = _plt.subplots(figsize=figsize)
+
+    for i in range(n_types):
+        ax.bar(x, proportions[:, i], bottom=bottom, label=type_labels[i])
+        bottom += proportions[:, i]
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(sample_labels, rotation=45, ha='right')
+    ax.legend(title='Type', bbox_to_anchor=(1.05, 1), loc='upper left')
+    if show:
+        _plt.show()
+    else:
+        return _plt.gcf()
+
+def clr_transform(x):
+    x = _np.array(x)
+    # Multiplicative replacement if zeros exist (optional step)
+    if _np.any(x == 0):
+        x = _np.where(x == 0, 1e-6, x)
+    
+    geometric_mean = _np.exp(_np.mean(_np.log(x)))
+    return _np.log(x / geometric_mean)
 
 
-
-_RGBType: type = tuple[int, int, int] | str # e.g., '1fff2b'
+_RGBType = tuple[int, int, int] | str # e.g., '1fff2b'
 def color_cells(
     spannpoints: SpAnnPoints,
     n_colors: int | list[_RGBType] = 6,

@@ -2,7 +2,8 @@ import numpy as _np
 from scipy.sparse import issparse as _issparse
 from scipy.sparse import eye as _eye
 from tqdm import tqdm as _tqdm
-
+import pandas as _pd
+import os as _os
 
 from .types import (
     _AnnData,
@@ -426,3 +427,146 @@ def chunk_spatial(
         chunk_map.setdefault(chunk_id, []).append(idx)
 
     return list(chunk_map.values())
+
+
+def write_to_csv(
+    anndata: _AnnData,
+    filepath: str,
+    colname_x: str = 'x',
+    colname_y: str = 'y',
+    colname_gene: str = 'gene',
+    colname_counts: str = 'counts',
+    sep: str = ',',
+    verbose: bool = True,
+) -> None:
+    """
+    Save anndata in csv format, as is used in TopACT (Benjamin, K., Bhandari, A., Kepple, J.D. et al., 2024) or FICTURE (Si, Y., Lee, C., Hwang, Y. et al., 2024).
+
+    anndata.X is expected to be in csr_matrix format.
+
+    NOTE:
+        This function DOES NOT automatically sort samples by spatial coordinates!
+
+        This function DOES NOT automatically convert coordinates or counts of float type into integer type!
+
+        This function DOES NOT automatically merge genes of different versions or alternative splicing!
+
+    """
+    if not (filepath.endswith('.csv') or filepath.endswith('.tsv')):
+        filepath += '.csv'
+    if verbose:
+        _tqdm.write(f'Making place for {filepath}')
+    dirname = _os.path.dirname(filepath)
+    if dirname and (not _os.path.exists(dirname)):
+        _os.makedirs(dirname, exist_ok=True)
+    
+    colnames = [
+        colname_x,
+        colname_y,
+        colname_gene,
+        colname_counts,
+    ]
+
+    data = []
+
+    if verbose:
+        itor_ = _tqdm(range(anndata.shape[0]), desc='Converting to csv')
+    else:
+        itor_ = range(anndata.shape[0])
+    
+    for i in itor_:
+        x, y = anndata.obsm['spatial'][i,:]
+        ix_genes = anndata.X[i,:].nonzero()[1]
+        if ix_genes.shape[0] == 0:
+            continue
+        counts = anndata.X[i, ix_genes].toarray().reshape(-1)
+        genes_ = anndata.var.index[ix_genes].astype(str).values
+        for j, gene in enumerate(genes_):
+            data.append(
+                [x, y, gene, counts[j]]
+            )
+
+    df = _pd.DataFrame(
+        data=data,
+        columns=colnames,
+    )
+    if verbose:
+        _tqdm.write(f'Writing to {filepath}')
+    df.to_csv(
+        path_or_buf=filepath,
+        sep=sep,
+    )
+    if verbose:
+        _tqdm.write(f'Done {filepath}')
+    return
+
+
+
+def read_from_csv(
+    filepath: str,
+    colname_x: str = 'x',
+    colname_y: str = 'y',
+    colname_gene: str = 'gene',
+    colname_counts: str = 'counts',
+    sep: str = ',',
+    verbose: bool = True,
+) -> _AnnData:
+    """
+    Read AnnData from csv file (as is used in TopACT (Benjamin, K., Bhandari, A., Kepple, J.D. et al., 2024) or FICTURE (Si, Y., Lee, C., Hwang, Y. et al., 2024)).
+    
+    Each sample/spot/pixel is assumed to possess a unique spatial coordinate.
+    
+    Return:
+        AnnData:
+            .X: count matrix of csr_matrix format;
+            
+            .obsm['spatial']: spatial coordinates.
+    """
+    if verbose:
+        _tqdm.write(f'Reading spatial trx csv file {filepath}')
+    df = _pd.read_csv(filepath, index_col=0)
+    colnames = [colname_x, colname_y, colname_gene, colname_counts]
+    for cname in colnames:
+        assert cname in df.columns
+    df = df[colnames].copy()
+
+    genelist = _np.sort(_np.unique(df.iloc[:,2].values))
+    genes_map: dict[str, int] = {
+        gname: ix for ix, gname in enumerate(genelist)
+    }
+
+    if verbose:
+        itor_ = _tqdm(range(df.shape[0]), desc='Building index for coords')
+    else:
+        itor_ = range(df.shape[0])
+    coords_map: dict[tuple, list[int]] = dict()
+    for i in itor_:
+        x, y, _, _ = df.iloc[i, :]
+        if (x,y) not in coords_map:
+            coords_map[(x,y)] = [i]
+        else:
+            coords_map[(x,y)].append(i)
+    n_obs = len(coords_map)
+    n_var = len(genelist)
+
+    X = _lil_matrix((n_obs, n_var))
+    X = X.astype(df.iloc[:,3].dtype)
+    if verbose:
+        itor_ = enumerate(_tqdm(list(coords_map.keys()), desc='Building AnnData'))
+    else:
+        itor_ = enumerate(list(coords_map.keys()))
+
+    for i_obs, (x, y) in itor_:
+        ix_df = coords_map[(x,y)]
+        gnames, counts = df.iloc[ix_df, 2], df.iloc[ix_df, 3]
+        ix_genes = [genes_map[gname] for gname in gnames]
+        X[i_obs,ix_genes] = counts
+    
+    return _AnnData(
+        X=X.tocsr(),
+        var=_pd.DataFrame(index=genelist),
+        obsm={'spatial': _np.array(tuple(coords_map.keys()))},
+    )
+
+
+        

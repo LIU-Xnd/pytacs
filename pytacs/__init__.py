@@ -1,22 +1,13 @@
-# pytacs: Python Topology-Aware Cell Segmentation -
-#  an improved version of TopACT (https://gitlab.com/kfbenjamin/topact)
-#  implementation.
-
-# Author: Liu X., 2024.12
-
-# Novelty so far:
-# - Self-discovered prior knowledge;
-# - Improved cell shape approximation;
-# - Independency from imaging segmentation information;
-# - Improved local classifier strategy - higher inferencing accuracy;
-
+"""pytacs: Python Topology-Aware Cell Segmentation"""
 
 __author__ = "Liu, Xindong"
-__version__ = "2025.7.29"  # alpha
+__version__ = "2025.8.11"  # alpha
 
 from .utils import (
     chunk_spatial,
     reinit_index,
+    read_from_csv,
+    write_to_csv,
 )
 from .data import (
     AnnDataPreparer,
@@ -27,6 +18,7 @@ from .data import (
     scale_genes,
     downsample_cells,
     compare_umap,
+    sort_by_coords,
 )
 from .classifier import (
     SVM,
@@ -57,6 +49,8 @@ from .spatial import (
     aggregate_spots_to_cells_parallel,
     NucleiMasks,
     vonoroi_indices,
+    align_coords,
+    transfer_label,
 )
 from .plot import (
     pie,

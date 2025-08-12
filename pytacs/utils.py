@@ -437,6 +437,7 @@ def write_to_csv(
     colname_gene: str = 'gene',
     colname_counts: str = 'counts',
     sep: str = ',',
+    save_index_col: bool = False,
     verbose: bool = True,
 ) -> None:
     """
@@ -495,6 +496,7 @@ def write_to_csv(
     df.to_csv(
         path_or_buf=filepath,
         sep=sep,
+        index=save_index_col,
     )
     if verbose:
         _tqdm.write(f'Done {filepath}')
@@ -509,6 +511,7 @@ def read_from_csv(
     colname_gene: str = 'gene',
     colname_counts: str = 'counts',
     sep: str = ',',
+    exists_index_col: bool = False,
     verbose: bool = True,
 ) -> _AnnData:
     """
@@ -524,7 +527,10 @@ def read_from_csv(
     """
     if verbose:
         _tqdm.write(f'Reading spatial trx csv file {filepath}')
-    df = _pd.read_csv(filepath, index_col=0)
+    df = _pd.read_csv(filepath, sep=sep, index_col=(
+            0 if exists_index_col else None
+        )
+    )
     colnames = [colname_x, colname_y, colname_gene, colname_counts]
     for cname in colnames:
         assert cname in df.columns

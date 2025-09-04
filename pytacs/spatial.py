@@ -1667,8 +1667,8 @@ def cluster_spatial_domain(
     assert len(coords.shape) == 2
     assert len(cell_types.shape) == 1
     assert algorithm in ["agglomerative", "kmeans"]
-    if n_clusters > 10:
-        _tqdm.write(f"Warning: {n_clusters=} could be large, might be a memory hog")
+    if n_clusters > 10 and algorithm=='agglomerative':
+        _tqdm.write(f"Warning: {n_clusters=} could be large, might be a memory hog. Consider using algorithm=kmeans")
 
     # Create distance matrix
     # Build grids

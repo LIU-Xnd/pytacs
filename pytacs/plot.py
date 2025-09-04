@@ -366,11 +366,68 @@ def plot_stacked_barplot(
 
     ax.set_xticks(x)
     ax.set_xticklabels(sample_labels, rotation=45, ha='right')
-    ax.legend(title='Type', bbox_to_anchor=(1.05, 1), loc='upper left')
+    ax.legend(title='Type', bbox_to_anchor=(1.05, 1), loc='upper left', frameon=False)
     if show:
         _plt.show()
     else:
         return _plt.gcf()
+
+def plot_stacked_barplot_circular(
+        proportions,
+        sample_labels=None,
+        type_labels=None,
+        figsize=(5, 5),
+        show=True,
+):
+    """
+    Plot a stacked circular barplot from a matrix of proportions.
+
+    Parameters
+    ----------
+    proportions : array-like of shape (n_samples, n_types)
+        A 2D array where each row corresponds to a sample, and each column corresponds to 
+        a proportion of a specific type (e.g., cell type proportions).
+
+    sample_labels : list of str, optional
+        Labels for each sample (x-axis). If None, samples will be labeled as "Sample 1", "Sample 2", etc.
+
+    type_labels : list of str, optional
+        Labels for each type (legend). If None, types will be labeled as "Type 1", "Type 2", etc.
+
+    figsize : tuple, optional (default: (5, 5))
+        Size of the matplotlib figure.
+
+    Returns
+    -------
+    None
+        The function displays a matplotlib stacked bar plot.
+    """
+    proportions = _np.asarray(proportions)
+    n_samples, n_types = proportions.shape
+
+    if sample_labels is None:
+        sample_labels = [f'Sample {i+1}' for i in range(n_samples)]
+
+    if type_labels is None:
+        type_labels = [f'Type {i+1}' for i in range(n_types)]
+
+    x = np.linspace(0, 2*np.pi, n_domains, endpoint=False)
+    bottom = _np.zeros(n_samples)
+
+    fig, ax = _plt.subplots(subplot_kw={'projection': 'polar'}, figsize=figsize)
+
+    for i in range(n_types):
+        ax.bar(x, proportions[:, i], bottom=bottom, width=2*np.pi/n_domains, edgecolor="white", linewidth=0.5, label=type_labels[i])
+        bottom += proportions[:, i]
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(sample_labels)
+    ax.legend(title='Type', bbox_to_anchor=(1.05, 1), loc='upper left', frameon=False)
+    if show:
+        _plt.show()
+    else:
+        return _plt.gcf()
+
 
 def clr_transform(x):
     x = _np.array(x)

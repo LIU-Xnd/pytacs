@@ -1,7 +1,7 @@
 """pytacs: Python Topology-Aware Cell Segmentation"""
 
 __author__ = "Liu, Xindong"
-__version__ = "2025.9.4"  # alpha
+__version__ = "2025.9.10"  # alpha
 
 from .utils import (
     chunk_spatial,
@@ -54,6 +54,8 @@ from .spatial import (
 )
 from .plot import (
     pie,
+    plot_stacked_barplot,
+    plot_stacked_barplot_circular,
     SpAnnPoints,
     get_boundaries,
     plot_boundaries,

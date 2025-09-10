@@ -1,6 +1,6 @@
 [project]
 name = "pytacs"
-version = "2025.9.4"
+version = "2025.9.10"
 description = "Pytacs: Python-implemented Topology-Aware Cell Segmentation for high-resolution spatial transcriptomics"
 authors = [
     {name = "Xindong Liu",email = "lqxnds@foxmail.com"}

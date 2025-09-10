@@ -875,6 +875,7 @@ def merge_gene_version(
 ) -> _AnnData:
     """
     Merge gene versions in an AnnData object. Keep the maximum counts among versions of gene.
+    Note that .layers and .var will be empty.
 
     Args:
         adata (_AnnData): The AnnData object to process.
@@ -918,7 +919,6 @@ def merge_gene_version(
         obsm=adata.obsm.copy(),
         obsp=adata.obsp.copy(),
         uns=adata.uns.copy(),
-        layers=adata.layers.copy(),
     )
 
     return adata_merged

@@ -1,9 +1,11 @@
 # Basic Usage of `pytacs`:
 
-## Step 1. Prepare your data
+(Updated in 2025.9.12)
+
+## Step 1. Prepare your data (Old Fashioned)
 
 ```Python
-import pytacs as tax  # Our tools
+import pytacs  # Our tool
 import scanpy as sc  # A popular single-cell analysis tool
 
 # Step 1. Prepare snRNA-seq and ST data
@@ -14,6 +16,9 @@ data_preper = tax.AnnDataPreparer(
 # # Filter for highly variable genes, if you want
 # data_preper.filter_highly_variable_genes()
 print(data_preper)
+
+sn_adata = data_preper.sn_adata
+sp_adata = data_preper.sp_adata
 ```
 
 Output:
@@ -21,58 +26,83 @@ Output:
 ```
 --- AnnDataPreparer (pytacs) ---
 - sn_adata: AnnData object with n_obs × n_vars = 30308 × 42563
-    obs: 'batch', 'n_counts', 'mt_proportion', 'old_index', 'cell_type'
-    uns: 'annotation_colors', 'batch_colors', 'log1p', 'neighbors', 'pca', 'umap', 'cell_type_colors'
-    obsm: 'X_pca', 'X_umap'
-    varm: 'PCs'
-    layers: 'log1p'
-    obsp: 'connectivities', 'distances'
+    obs: 'old_index', 'cell_type'
 - sp_adata: AnnData object with n_obs × n_vars = 9216 × 42563
-    obs: 'cell_type_groundtruth', 'cell_belong_groundtruth', 'old_index'
-    osbm: 'spatial'
+    obs: 'old_index'
+    obsm: 'spatial'
 --- --- --- --- ---
+```
+
+## Step 1. Prepare your data (New Fashioned)
+
+```Python
+import pytacs  # Our tool
+import scanpy as sc  # A popular single-cell analysis tool
+
+# Step 1. Prepare snRNA-seq and ST data
+sn_adata=sc.read_h5ad("your-snRNA-seq-data.h5ad"),
+sp_adata=sc.read_h5ad("your-ST-data.h5ad"),
+# make sure spatial coordinates saved in .obsm['spatial']
+
+# You can pre-bin your spatial data for faster computation and better performance
+sp_adata = pytacs.binX(sp_adata, binsize=9) # 9 um
+
+# Reinit index for Pytacs compatibility
+pytacs.reinit_index(sn_adata)
+pytacs.reinit_index(sp_adata)
 ```
 
 ## Step 2. Train a local classifier
 
 ```Python
 # Step 2. Train a local classifier
-clf = tax.SVM()
-clf.fit(data_preper.sn_adata)
+clf = pytacs.SVM()
+clf.fit(sn_adata)
 ```
 
 ## Step 3. Aggregate the spatial transcriptome
 
 ```Python
->>> agg_res = tax.rw_aggregate(
-    st_anndata=data_prep.sp_adata,
+aggres = pytacs.rw_aggregate( # Or use pytacs.rw_aggregate_sequential for low mem
+    st_anndata=sp_adata,
     classifier=clf,
-    max_iter=20,
-    steps_per_iter=3,
+    max_iter=4,
+    steps_per_iter=1,
     nbhd_radius=2.4,
-    max_propagation_radius=10.,
+    max_propagation_radius=5,
     mode_metric='inv_dist',
     mode_embedding='pc',
     mode_aggregation='unweighted',
-    n_pcs=50,
+    mode_prune='proportional',
 )
->>> ct_full = extract_celltypes_full(agg_res)
 
-# Plot the celltypes
->>> import seaborn as sns
->>> sns.scatterplot(
-    x=data_prep.sp_adata.obsm['spatial'][:,0],
-    y=data_prep.sp_adata.obsm['spatial'][:,1],
-    hue=ct_full,
+sp_adata.obs['cell_type_pytacs'] = pytacs.extract_celltypes_full(aggres)
+sp_adata.obs['cell_size_pytacs'] = pytacs.extract_cell_sizes_full(aggres)
+
+# Get type-refined pseudo-single-cell spatial transcriptomics 
+
+sp_adata.obs['cell_id_pytacs'] = pytacs.ctrbin_cellseg(
+    ann_count_matrix=pytacs.SpTypeSizeAnnCntMtx(
+        count_matrix=sp_adata.X,
+        spatial_distances=sp_adata.obsp['spatial_distances'],
+        cell_types=sp_adata.obs['cell_type_pytacs'],
+        cell_sizes=sp_adata.obs['cell_size_pytacs'],
+    ),
+    attitude_to_undefined='exclusive',
+    allow_reassign=False,
 )
-# Get refined binned pseudo-single-cell spatial transcriptomics 
->>> ann_mtx = tax.SpTypeSizeAnnCntMtx(
-    count_matrix,
-    spatial_coords,
-    cell_types,
-    cell_sizes,
+# Till now, sp_adata is well-annotated spot-level anndata
+
+pseudo_cell_adata = pytacs.aggregate_spots_to_cells_parallel(
+    sp_adata,
+    n_workers=40,
 )
->>> ann_mtx_sc = tax.ctrbin_cellseg_parallel(
-    ann_mtx,
-)
+# Till now, annotated pseudo-cell anndata is generated.
+```
+
+## Step 4. Save results
+```Python
+sp_adata.write_h5ad('Your/output/path/for/spot-level.h5ad', compression='gzip')
+pseudo_cell_adata.write_h5ad('Your/output/path/for/single-cell', compression='gzip')
+
 ```

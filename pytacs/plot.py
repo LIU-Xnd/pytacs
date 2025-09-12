@@ -12,6 +12,17 @@ from .types import (
     _NDArray,
 )
 
+rcParams_setupStr = '''
+import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set_theme('paper', 'white')
+plt.rcParams['figure.dpi'] = 900.0
+plt.rcParams['scatter.edgecolors'] = 'none'
+plt.rcParams['figure.figsize'] = [4,3]
+plt.rcParams['savefig.format'] = 'jpg'
+plt.rcParams['savefig.format'] = 'jpg'
+'''
+
 
 @_dataclass
 class SpAnnPoints:

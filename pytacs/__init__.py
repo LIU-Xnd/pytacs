@@ -1,7 +1,7 @@
 """pytacs: Python Topology-Aware Cell Segmentation"""
 
 __author__ = "Liu, Xindong"
-__version__ = "2025.9.12"
+__version__ = "2025.9.15"
 
 from .utils import (
     chunk_spatial,

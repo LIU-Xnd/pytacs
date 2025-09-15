@@ -422,13 +422,13 @@ def plot_stacked_barplot_circular(
     if type_labels is None:
         type_labels = [f'Type {i+1}' for i in range(n_types)]
 
-    x = np.linspace(0, 2*np.pi, n_domains, endpoint=False)
+    x = _np.linspace(0, 2*_np.pi, n_domains, endpoint=False)
     bottom = _np.zeros(n_samples)
 
     fig, ax = _plt.subplots(subplot_kw={'projection': 'polar'}, figsize=figsize)
 
     for i in range(n_types):
-        ax.bar(x, proportions[:, i], bottom=bottom, width=2*np.pi/n_domains, edgecolor="white", linewidth=0.5, label=type_labels[i])
+        ax.bar(x, proportions[:, i], bottom=bottom, width=2*_np.pi/n_domains, edgecolor="white", linewidth=0.5, label=type_labels[i])
         bottom += proportions[:, i]
 
     ax.set_xticks(x)

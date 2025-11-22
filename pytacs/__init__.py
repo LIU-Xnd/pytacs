@@ -1,7 +1,7 @@
-"""pytacs: Python Topology-Aware Cell Segmentation"""
+"""pytacs: Python Topology-Aware Cell Segmentation (Prototype for DeTACH)"""
 
-__author__ = "Liu, Xindong"
-__version__ = "2025.9.15"
+__author__ = "Xindong Liu"
+__version__ = "2025.11.21"
 
 from .utils import (
     chunk_spatial,

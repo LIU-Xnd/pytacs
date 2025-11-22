@@ -5,7 +5,6 @@ import numpy as _np
 import pandas as _pd
 import scanpy as _sc
 from dataclasses import dataclass as _dataclass
-from itertools import product as _product
 from multiprocessing.pool import Pool as _Pool
 from scipy.cluster.hierarchy import (
     fcluster as _fcluster,
@@ -1432,7 +1431,7 @@ def ctrbin_cellseg(
         so that a larger (or smaller) set of cells is resulted.
     
     nuclei_priorities : 1DArray | None, optional (default=None)
-        An array of spot ids in a certain order, e.g., the order of nuclei staining intensities. If provided,
+        An array of spot ids (integers) in a certain order, e.g., the order of nuclei staining intensities. If provided,
         uses the order to generate cell centroids sequentially. If None, uses n_counts order (L1-order).
 
     attitude_to_undefined : _Literal['tolerant', 'exclusive'], optional (default='tolerant')
@@ -1548,6 +1547,14 @@ def ctrbin_cellseg(
         cell_candidates_bool[ix_nbors[dists_nbors < ranges_overlap[i_centroid]]] = False
     return cell_masks
 
+def _get_ranks(numbers: _1DArrayType) -> _1DArrayType:
+    # Get indices that would sort the array
+    sorted_indices = _np.argsort(numbers)
+    # Create ranks array
+    ranks = _np.zeros_like(sorted_indices)
+    ranks[sorted_indices] = _np.arange(len(numbers))
+    return ranks.astype(int)
+
 
 def ctrbin_cellseg_parallel(
     ann_count_matrix: SpTypeSizeAnnCntMtx,
@@ -1579,28 +1586,31 @@ def ctrbin_cellseg_parallel(
         _tqdm.write(f"Total {len(chunk_indices)} chunks.")
     if verbose:
         _tqdm.write("Chunks ready. Allocating jobs..")
-    chunks: list[tuple] = [
-        (
-            SpTypeSizeAnnCntMtx(
-                count_matrix=ann_count_matrix.count_matrix[
-                    ixs, :
-                ].copy(),
-                spatial_distances=ann_count_matrix.spatial_distances[
-                    ixs, :
-                ][:, ixs].copy(),
-                cell_types=ann_count_matrix.cell_types[ixs],
-                cell_sizes=ann_count_matrix.cell_sizes[ixs],
-            ),
-            coeff_overlap_constraint,
-            coeff_cellsize,
-            nuclei_priorities,
-            type_name_undefined,
-            attitude_to_undefined,
-            verbose,
-            allow_reassign,
+    chunks: list[tuple] = []
+    for ixs in chunk_indices:
+        _nuc_prio = _np.array([ix_nuc for ix_nuc in nuclei_priorities if ix_nuc in ixs])
+        _nuc_prio = _get_ranks(_nuc_prio)
+        chunks.append(
+            (
+                SpTypeSizeAnnCntMtx(
+                    count_matrix=ann_count_matrix.count_matrix[
+                        ixs, :
+                    ].copy(),
+                    spatial_distances=ann_count_matrix.spatial_distances[
+                        ixs, :
+                    ][:, ixs].copy(),
+                    cell_types=ann_count_matrix.cell_types[ixs],
+                    cell_sizes=ann_count_matrix.cell_sizes[ixs],
+                ),
+                coeff_overlap_constraint,
+                coeff_cellsize,
+                _nuc_prio,
+                type_name_undefined,
+                attitude_to_undefined,
+                verbose,
+                allow_reassign,
+            )
         )
-        for ixs in chunk_indices
-    ]
     if verbose:
         _tqdm.write("Running jobs..")
     with _Pool(len(chunk_indices)) as _p:
@@ -1783,9 +1793,16 @@ def aggregate_spots_to_cells(
         spots belonging to the same cell ID.
     """
     cell_id_pool: _1DArrayType = _np.unique(st_anndata.obs[obs_name_cell_id].values)
-    whr_def: _1DArrayType = cell_id_pool != -1
+    
+    # Filter out undefined values - support both integer and string cell_ids
+    if cell_id_pool.dtype.kind in ['i', 'u']:  # integer types
+        whr_def: _1DArrayType = (cell_id_pool != -1) & (cell_id_pool != 'Undefined')
+    else:  # string or other types
+        whr_def: _1DArrayType = (cell_id_pool != '-1') & (cell_id_pool != 'Undefined')
+    
     cell_id_pool = cell_id_pool[whr_def]
     del whr_def
+    
     if verbose:
         itor_ = _tqdm(
             range(len(cell_id_pool)),
@@ -1794,6 +1811,7 @@ def aggregate_spots_to_cells(
         )
     else:
         itor_ = range(len(cell_id_pool))
+    
     X_sc: _lil_matrix = _lil_matrix((len(cell_id_pool), st_anndata.X.shape[1])).astype(
         int
     )
@@ -1801,10 +1819,10 @@ def aggregate_spots_to_cells(
         shape=(X_sc.shape[0], 2),
         dtype=float,
     )
-    # df_obs: _pd.DataFrame = st_anndata.obs.loc[cell_id_pool.astype(str), :].copy()  # buggy
     celltype_obs: list[str] = []
+    
     for i_cellid in itor_:
-        cellid: int = cell_id_pool[i_cellid]
+        cellid = cell_id_pool[i_cellid]  # Remove type annotation to support any type
         whr_thiscell: _1DArrayType = st_anndata.obs[obs_name_cell_id].values == cellid
         X_sc[i_cellid, :] = st_anndata.X[whr_thiscell, :].sum(axis=0)
         if "spatial" in st_anndata.obsm:
@@ -1813,9 +1831,9 @@ def aggregate_spots_to_cells(
             )
         if obs_name_cell_type is not None:
             celltype_obs.append(st_anndata.obs.loc[whr_thiscell, obs_name_cell_type].values[0])
+    
     res = _AnnData(
         X=X_sc.tocsr(),
-        # obs=df_obs,  # buggy
         var=st_anndata.var.copy(),
         obsm={"spatial": sp_coords} if "spatial" in st_anndata.obsm else None,
     )

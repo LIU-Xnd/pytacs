@@ -1,7 +1,7 @@
 """pytacs: Python Topology-Aware Cell Segmentation (Prototype for DeTACH)"""
 
 __author__ = "Xindong Liu"
-__version__ = "2025.11.21"
+__version__ = "2025.11.27"
 
 from .utils import (
     chunk_spatial,
@@ -64,3 +64,4 @@ from .plot import (
 )
 
 # TODO: Add recipe module for user-friendliness
+from . import recipe

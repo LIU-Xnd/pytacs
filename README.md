@@ -1,5 +1,7 @@
 # Pytacs - Python-implemented Topology-Aware Cell Segmentation
 
+Note: this is a prototype for DeTACH. Pytacs was initially a Python package but now supports command-line usage.
+
 ```
 Copyright (C) 2025 Xindong Liu
 
@@ -18,19 +20,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ```
 
 A tool for segmenting/integrating sub-cellular spots in high-resolution spatial
-transcriptomics into single-cellular spots and cell-type mapping.
+transcriptomics into single-cellular spots and cell-type mapping leveraging paired scRNA-seq.
 
-Ideas are inspired by (Benjamin et al., 2024)'s work TopACT
-(see https://gitlab.com/kfbenjamin/topact).
-But Pytacs has improved it in several ways:
-
-1. The shape of predicted cells can be diverse rather than a rectangle/grid, rendering higher accuracy;
-2. Random-Walk-based aggregation strategy with comparative computational speed, making it more
-"topology-aware", and rendering higher accuracy especially at cell boundaries;
 
 ## Requirements
-This package is released on PyPi now! It could be simply
-installed by `pip install pytacs` (the package name yet might change).
+It could be simply
+installed by `pip install pytacs`.
 
 For conda users,
 
@@ -61,9 +56,18 @@ To use it for downstream analysis in combination with Squidpy, it is recommended
 
 ## Usage
 
-In the future, there will be a well-prepared `recipe` module for users to use conveniently.
+(Updated in 2025.11.27)
 
-For detailed usage, see [Basic_Usage_of_pytacs.md](./Basic_Usage_of_pytacs.md)
+Pytacs now is packed as a commandline tool:
+
+See help:
+
+```
+$ python -m pytacs -h
+```
+
+If you are interested in using Pytacs as a python package, we recommend using pytacs.recipe module.
+See docstring in pytacs.recipe.
 
 ## Demo
 

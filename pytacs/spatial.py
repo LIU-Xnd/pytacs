@@ -1588,8 +1588,11 @@ def ctrbin_cellseg_parallel(
         _tqdm.write("Chunks ready. Allocating jobs..")
     chunks: list[tuple] = []
     for ixs in chunk_indices:
-        _nuc_prio = _np.array([ix_nuc for ix_nuc in nuclei_priorities if ix_nuc in ixs])
-        _nuc_prio = _get_ranks(_nuc_prio)
+        if nuclei_priorities is not None:
+            _nuc_prio = _np.array([ix_nuc for ix_nuc in nuclei_priorities if ix_nuc in ixs])
+            _nuc_prio = _get_ranks(_nuc_prio)
+        else:
+            _nuc_prio = None
         chunks.append(
             (
                 SpTypeSizeAnnCntMtx(

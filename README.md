@@ -1,6 +1,6 @@
 # Pytacs - Python-implemented Topology-Aware Cell Segmentation
 
-Note: this is a prototype for DeTACH. Pytacs was initially a Python package but now supports command-line usage.
+Note: this is a prototype for DeTACH (https://pypi.org/project/pydetach/). Pytacs was initially a Python package but now supports command-line usage.
 
 ```
 Copyright (C) 2025 Xindong Liu
